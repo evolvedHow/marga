@@ -22,9 +22,8 @@ dev = [
 ]
 
 # Cloudflare Workers deployment (optional)
-worker = [
-    "cloudflare-workers>=0.1.0",
-]
+# Deployment uses pywrangler (uv run --with pywrangler ...)
+# No additional package dependencies needed for worker runtime
 
 [tool.hatch.build.targets.wheel]
 packages = ["marga"]
