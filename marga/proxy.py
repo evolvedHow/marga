@@ -427,6 +427,80 @@ class Proxy:
             await self._ensure_secrets()
             return await self._handle_chat(request)
 
+        # Anthropic /v1/messages endpoint
+        @app.post(
+            "/v1/messages",
+            tags=["anthropic"],
+            summary="Anthropic Messages API",
+            response_description="Anthropic-compatible message response",
+        )
+        async def anthropic_messages(
+            request: "AnthropicRequest",  # noqa: F821
+        ) -> "AnthropicResponse | StreamingResponse":  # noqa: F821
+            """Anthropic /v1/messages endpoint with translation to OpenAI format."""
+            from .anthropic import (
+                AnthropicRequest,
+                anthropic_to_openai,
+                openai_to_anthropic,
+                translate_openai_stream,
+            )
+
+            await self._ensure_secrets()
+
+            # Parse as Anthropic request
+            anthropic_req = AnthropicRequest.model_validate(request)
+
+            # Translate to OpenAI format
+            openai_dict = anthropic_to_openai(anthropic_req)
+            from .models import ChatCompletionRequest
+
+            openai_req = ChatCompletionRequest.model_validate(openai_dict)
+
+            # Route through internal OpenAI handler
+            result = await self._handle_chat(openai_req)
+
+            # Translate response back to Anthropic format
+            if anthropic_req.stream:
+                # Streaming: wrap and translate SSE events
+                from .anthropic import translate_openai_stream
+
+                async def anthropic_stream() -> AsyncIterator[bytes]:
+                    async for chunk in translate_openai_stream(
+                        result.body_iterator, anthropic_req.model
+                    ):
+                        yield chunk
+
+                return StreamingResponse(
+                    anthropic_stream(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                )
+            else:
+                # Non-streaming: translate response dict
+                response_dict = result.model_dump() if hasattr(result, "model_dump") else result
+                anthropic_dict = openai_to_anthropic(response_dict, anthropic_req.model)
+                from .anthropic import AnthropicResponse
+
+                return AnthropicResponse.model_validate(anthropic_dict)
+
+        # Add middleware
+        from .middleware import (
+            BearerAuthMiddleware,
+            add_cors,
+            get_auth_token,
+            get_cors_origins,
+        )
+
+        # CORS (if configured)
+        cors_origins = get_cors_origins()
+        if cors_origins:
+            add_cors(app, origins=cors_origins)
+
+        # Bearer auth (if configured)
+        auth_token = get_auth_token()
+        if auth_token:
+            app.add_middleware(BearerAuthMiddleware, token=auth_token)
+
         self._app = app
         return app
 

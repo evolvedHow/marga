@@ -2,6 +2,11 @@
 
 Parse TOML files or environment variables into a :class:`~marga.proxy.Proxy`
 instance with backends, routing strategy, and hooks configured.
+
+Vault credentials are loaded from:
+1. Environment variables (VAULT_URL, VAULT_TOKEN)
+2. ~/docker/stack/.env file (local dev standard)
+3. Cloudflare Worker environment (wrangler secrets for deployed workers)
 """
 
 from __future__ import annotations
@@ -13,8 +18,37 @@ from pathlib import Path
 from typing import Any
 
 
+def _load_vault_env() -> None:
+    """Load vault credentials from ~/docker/stack/.env if not already set.
+
+    This is the standard location for vault credentials per homelab rules.
+    Does nothing if VAULT_URL and VAULT_TOKEN are already in the environment.
+    """
+    if os.getenv("VAULT_URL") and os.getenv("VAULT_TOKEN"):
+        return  # Already configured
+
+    stack_env = Path.home() / "docker" / "stack" / ".env"
+    if not stack_env.exists():
+        return
+
+    # Simple env file parser (key=value lines, ignoring comments and empty lines)
+    with stack_env.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                if key in ("VAULT_URL", "VAULT_TOKEN") and not os.getenv(key):
+                    os.environ[key] = value
+
+
 def proxy_from_toml(path: str | Path, **overrides: Any) -> "Proxy":  # noqa: F821
     """Build a Proxy from a TOML configuration file.
+
+    Loads vault credentials from environment or ~/docker/stack/.env if available.
 
     Args:
         path: Path to the TOML configuration file.
@@ -40,12 +74,14 @@ def proxy_from_toml(path: str | Path, **overrides: Any) -> "Proxy":  # noqa: F82
     if not backends:
         raise ValueError("TOML must contain a [backends] section")
 
+    # Load vault credentials from standard location
+    _load_vault_env()
+
     # Extract optional proxy-level settings
     name = config.get("name", overrides.pop("name", "marga"))
+    vault_context = config.get("vault_context", name)
 
-    # Strategy can be specified as a string reference or inline config
-    # For now, just pass backends and let Proxy use defaults
-    return Proxy(name=name, backends=backends, **overrides)
+    return Proxy(name=name, backends=backends, vault_context=vault_context, **overrides)
 
 
 def proxy_from_env(**overrides: Any) -> "Proxy":  # noqa: F821
@@ -54,6 +90,9 @@ def proxy_from_env(**overrides: Any) -> "Proxy":  # noqa: F821
     Checks for:
     - ``MARGA_CONFIG``: path to a TOML file (delegates to proxy_from_toml)
     - ``MARGA_BACKENDS``: JSON object mapping backend names to config dicts
+
+    Vault credentials are loaded from VAULT_URL/VAULT_TOKEN environment variables
+    or ~/docker/stack/.env if not already set.
 
     Args:
         **overrides: Additional kwargs passed to the Proxy constructor.
@@ -65,6 +104,9 @@ def proxy_from_env(**overrides: Any) -> "Proxy":  # noqa: F821
         ValueError: When neither MARGA_CONFIG nor MARGA_BACKENDS is set.
     """
     from .proxy import Proxy
+
+    # Load vault credentials from standard location
+    _load_vault_env()
 
     # Option 1: TOML file path
     config_path = os.getenv("MARGA_CONFIG")
@@ -83,7 +125,8 @@ def proxy_from_env(**overrides: Any) -> "Proxy":  # noqa: F821
             raise ValueError("MARGA_BACKENDS must be a JSON object")
 
         name = os.getenv("MARGA_NAME", "marga")
-        return Proxy(name=name, backends=backends, **overrides)
+        vault_context = os.getenv("MARGA_VAULT_CONTEXT", name)
+        return Proxy(name=name, backends=backends, vault_context=vault_context, **overrides)
 
     raise ValueError(
         "No configuration found. Set MARGA_CONFIG (TOML path) or "

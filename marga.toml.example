@@ -1,0 +1,73 @@
+# marga configuration example
+#
+# Usage:
+#   cp marga.toml.example marga.toml
+#   # Edit backends section with your endpoints
+#   export MARGA_CONFIG=marga.toml
+#   marga serve
+#
+# Or programmatically:
+#   from marga import Proxy
+#   proxy = Proxy.from_toml("marga.toml")
+#   proxy.serve()
+
+# Application name (used as vault context fallback and FastAPI title)
+name = "marga"
+
+# Vault context name for reading API keys (defaults to name)
+# Keys are read as KEY_<PROVIDER> from worker-env vault context
+vault_context = "marga"
+
+# Backend configurations
+# Each backend needs:
+#   - base_url: OpenAI-compatible endpoint
+#   - api_key_secret: Vault key name (e.g., "KEY_ANTHROPIC")
+#   - models: List of model IDs (empty = pass-through any model)
+#   - cost_per_1k_tokens: Optional USD rate for cost accounting
+
+[backends.llama]
+# Local llama.cpp server (no API key needed)
+# Auto-disabled in cloud runtime (loopback address)
+base_url = "http://127.0.0.1:8080/v1"
+models = ["qwen2.5-coder:7b", "llama3.2:3b"]
+cost_per_1k_tokens = 0.0
+
+[backends.anthropic]
+# Anthropic Claude API
+# API key read from worker-env vault as KEY_ANTHROPIC
+base_url = "https://api.anthropic.com/v1"
+api_key_secret = "KEY_ANTHROPIC"
+models = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
+cost_per_1k_tokens = 3.0  # Blended estimate
+
+[backends.openai]
+# OpenAI API
+# API key read from worker-env vault as KEY_OPENAI
+base_url = "https://api.openai.com/v1"
+api_key_secret = "KEY_OPENAI"
+models = ["gpt-4o", "gpt-4o-mini"]
+cost_per_1k_tokens = 2.5  # Blended estimate
+
+[backends.groq]
+# Groq fast inference API
+base_url = "https://api.groq.com/openai/v1"
+api_key_secret = "KEY_GROQ"
+models = ["llama-3.3-70b-versatile", "llama-3.3-70b-specdec"]
+cost_per_1k_tokens = 0.0  # Free tier
+
+[backends.openrouter]
+# OpenRouter gateway (pass-through)
+base_url = "https://openrouter.ai/api/v1"
+api_key_secret = "KEY_OPENROUTER"
+models = []  # Empty = accept any model ID
+cost_per_1k_tokens = 0.0  # Varies by model
+
+# Alternative: inline API key (NOT RECOMMENDED - use api_key_secret instead)
+# [backends.example]
+# base_url = "https://api.example.com/v1"
+# api_key = "sk-..." # Exposed in config file!
+
+# Alternative: environment variable fallback (for CI/testing without vault)
+# [backends.ci_test]
+# base_url = "https://api.example.com/v1"
+# api_key_env = "TEST_API_KEY"  # Reads from $TEST_API_KEY if vault unavailable
