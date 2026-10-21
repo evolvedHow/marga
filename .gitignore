@@ -54,3 +54,10 @@ dmyp.json
 
 # ruff
 .ruff_cache/
+
+# Cloudflare Workers
+.wrangler/
+.dev.vars
+.dev.vars.*
+worker-configuration.json
+wrangler-output.toml

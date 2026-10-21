@@ -1,0 +1,35 @@
+[env.production]
+name = "marga"
+main = "worker.py"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["python_workers"]
+
+# Python Workers require Python 3.13+
+# Local dev uses 3.11+, but Workers runtime is pyodide 3.13/3.14
+
+# Cloudflare Workers configuration
+# Deploy: uv run pywrangler deploy
+# Dev: uv run pywrangler dev
+
+# Environment variables (set via wrangler)
+# These are the bootstrap secrets - provider API keys come from the vault
+[env.production.vars]
+MARGA_RUNTIME = "cloud"  # Force cloud runtime detection
+# ALLOWED_ORIGINS = "*"  # or comma-separated list for CORS
+
+# Secrets (set via: wrangler secret put <NAME>)
+# These must be set before deploying:
+#   wrangler secret put VAULT_URL
+#   wrangler secret put VAULT_TOKEN  
+#   wrangler secret put MARGA_AUTH_TOKEN  # Optional: bearer token for public access
+#
+# Worker will read provider keys from worker-env vault context "marga"
+# Example vault keys: KEY_ANTHROPIC, KEY_OPENAI, KEY_GROQ, KEY_OPENROUTER
+
+# Backends configuration
+# Set via environment variable as JSON:
+#   wrangler secret put MARGA_BACKENDS
+# Or mount from a file / use vars (but secrets are safer for keys)
+#
+# Example MARGA_BACKENDS value (single-line JSON):
+# {"anthropic":{"base_url":"https://api.anthropic.com/v1","api_key_secret":"KEY_ANTHROPIC","models":["claude-3-5-sonnet-20241022","claude-3-5-haiku-20241022"]},"openai":{"base_url":"https://api.openai.com/v1","api_key_secret":"KEY_OPENAI","models":["gpt-4o","gpt-4o-mini"]},"groq":{"base_url":"https://api.groq.com/openai/v1","api_key_secret":"KEY_GROQ","models":["llama-3.3-70b-versatile"]}}
