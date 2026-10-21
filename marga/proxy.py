@@ -337,8 +337,40 @@ class Proxy:
 
         @app.get("/health", response_model=HealthResponse, tags=["meta"], summary="Liveness probe")
         async def health() -> HealthResponse:
-            """Report process liveness and the running version."""
-            return HealthResponse(version=__version__)
+            """Report process liveness, runtime, and backend availability."""
+            from ._util import detect_runtime, is_loopback
+            from .models import BackendHealth
+
+            runtime = detect_runtime()
+            backend_health = []
+
+            for backend in self.router.backends.values():
+                loopback = is_loopback(backend.base_url)
+
+                # Get availability status if checking is enabled
+                reachable = None
+                reason = ""
+                if self.router.check_availability and self.router._availability:
+                    result = await self.router._availability.check(backend)
+                    reachable = result.reachable
+                    reason = result.reason
+
+                backend_health.append(
+                    BackendHealth(
+                        name=backend.name,
+                        url=backend.base_url,
+                        enabled=backend.enabled,
+                        loopback=loopback,
+                        reachable=reachable,
+                        reason=reason,
+                    )
+                )
+
+            return HealthResponse(
+                version=__version__,
+                runtime=runtime,
+                backends=backend_health,
+            )
 
         @app.get(
             "/stats",

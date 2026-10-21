@@ -230,16 +230,40 @@ class ProxyInfo(BaseModel):
     backends: list[str]
 
 
+class BackendHealth(BaseModel):
+    """Health status for a single backend.
+
+    Attributes:
+        name: Backend name.
+        url: Base URL.
+        enabled: Whether the backend is enabled for routing.
+        loopback: Whether the URL is a loopback address.
+        reachable: Whether the backend is currently reachable (None if not checked).
+        reason: Explanation for the reachable status.
+    """
+
+    name: str
+    url: str
+    enabled: bool
+    loopback: bool
+    reachable: bool | None = None
+    reason: str = ""
+
+
 class HealthResponse(BaseModel):
     """Liveness probe payload.
 
     Attributes:
         status: Always ``ok`` for a running process.
         version: Installed marga version.
+        runtime: Detected runtime environment (``local`` or ``cloud``).
+        backends: Health status for each configured backend.
     """
 
     status: Literal["ok"] = "ok"
     version: str
+    runtime: Literal["local", "cloud"] | None = None
+    backends: list[BackendHealth] | None = None
 
 
 class BackendStats(BaseModel):

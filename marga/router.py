@@ -12,7 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._util import maybe_await
+from ._util import detect_runtime, is_loopback, maybe_await
+from .availability import AvailabilityChecker
 from .errors import UnknownBackendError
 from .hooks import HookContext
 from .store import InMemoryStore, UsageStore, usage_key
@@ -90,6 +91,7 @@ class Router:
         store: UsageStore | None = None,
         failover: bool = True,
         strategy: Any | None = None,
+        check_availability: bool = True,
     ) -> None:
         """Create a router.
 
@@ -101,11 +103,41 @@ class Router:
                 enabled backend after the primary choice.
             strategy: Initial strategy or route function; ``None`` selects
                 the default least-used strategy.
+            check_availability: When ``True``, probe backends for reachability
+                (loopback backends are auto-disabled in cloud runtime).
         """
         self.backends = backends
         self.store: UsageStore = store if store is not None else InMemoryStore()
         self.failover = failover
         self._target: Any | None = strategy
+        self.check_availability = check_availability
+        self._availability = AvailabilityChecker() if check_availability else None
+        self._runtime = detect_runtime()
+
+        # Filter out loopback backends in cloud runtime
+        if self._runtime == "cloud":
+            self._disable_loopback_backends()
+
+    def _disable_loopback_backends(self) -> None:
+        """Disable backends with loopback addresses in cloud runtime."""
+        for backend in self.backends.values():
+            if is_loopback(backend.base_url):
+                backend.enabled = False
+
+    async def _is_available(self, backend: Backend) -> bool:
+        """Check if a backend is currently reachable.
+
+        Args:
+            backend: Backend to check.
+
+        Returns:
+            True if the backend is reachable or availability checking is disabled.
+        """
+        if not self.check_availability or self._availability is None:
+            return True
+
+        result = await self._availability.check(backend)
+        return result.reachable
 
     def set_router(self, target: Any | None) -> None:
         """Register the routing decision.
@@ -203,7 +235,7 @@ class Router:
         """Rank enabled backends for failover.
 
         Backends serving the requested model rank above the rest; inside each
-        group, fewer recorded calls rank first.
+        group, fewer recorded calls rank first. Unreachable backends are filtered out.
 
         Args:
             requested: Model id the client asked for.
@@ -215,6 +247,18 @@ class Router:
         backends = [b for b in self.enabled_backends() if b.name not in exclude]
         if len(backends) <= 1:
             return backends
+
+        # Filter by availability
+        if self.check_availability:
+            available = []
+            for backend in backends:
+                if await self._is_available(backend):
+                    available.append(backend)
+            backends = available
+
+        if not backends:
+            return []
+
         snapshots = await self.store.get_many([usage_key(b.name) for b in backends])
         ranked = sorted(
             backends,
