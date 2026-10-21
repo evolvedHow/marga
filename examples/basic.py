@@ -1,6 +1,7 @@
 """Example usage of marga."""
 
 import os
+
 from marga import Proxy
 
 # Create proxy with multiple backends
@@ -22,7 +23,7 @@ proxy = Proxy(backends={
 @proxy.route
 def smart_route(ctx):
     """Route based on estimated complexity.
-    
+
     - Small requests (<1000 tokens) → local model
     - Large requests → OpenAI mini
     """
@@ -35,7 +36,7 @@ def smart_route(ctx):
 @proxy.before
 def add_rag_context(ctx):
     """Inject context from vector DB before LLM.
-    
+
     In real usage, you'd query your vector DB here.
     """
     # Example: Add system message with retrieved context
@@ -48,7 +49,7 @@ def add_rag_context(ctx):
                 "- Use this context to answer the user's question."
             )
         })
-    
+
     # Store metadata for later use
     ctx.metadata["rag_injected"] = True
 
@@ -59,10 +60,10 @@ def log_and_enhance(ctx, response):
     """Log usage and optionally enhance response."""
     usage = response.get("usage", {})
     print(f"[STATS] Tokens: {usage.get('total_tokens', 0)} | Model: {ctx.model}")
-    
+
     # You could modify response here
     # response["choices"][0]["message"]["content"] += "\n\n[Powered by margAI-lite]"
-    
+
     return response
 
 
@@ -71,7 +72,7 @@ def log_and_enhance(ctx, response):
 def enforce_system_prompt(ctx):
     """Ensure every request has a system prompt."""
     has_system = any(msg.get("role") == "system" for msg in ctx.messages)
-    
+
     if not has_system:
         ctx.messages.insert(0, {
             "role": "system",
@@ -88,5 +89,5 @@ if __name__ == "__main__":
     print("  GET  /health               - Health check")
     print("  GET  /stats                - Usage statistics")
     print("\nPress Ctrl+C to stop")
-    
+
     proxy.serve(host="127.0.0.1", port=8000)
