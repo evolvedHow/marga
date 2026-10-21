@@ -1,0 +1,33 @@
+services:
+  marga:
+    build: .
+    container_name: marga
+    network_mode: host  # Required for llama.cpp access via 127.0.0.1:8080
+    restart: unless-stopped
+    
+    environment:
+      # Config source (TOML file or JSON backends)
+      - MARGA_CONFIG=${MARGA_CONFIG:-/app/marga.toml}
+      
+      # Vault credentials (loaded from stack/.env)
+      - VAULT_URL=${VAULT_URL}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      
+      # Optional: Auth token for public endpoints
+      # - MARGA_AUTH_TOKEN=${MARGA_AUTH_TOKEN}
+      
+      # Optional: CORS origins
+      # - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      
+      # Runtime detection (auto-detected; override for testing)
+      # - MARGA_RUNTIME=local
+    
+    env_file:
+      - ~/docker/stack/.env  # Standard vault credentials location
+    
+    volumes:
+      # Mount config file
+      - ./marga.toml:/app/marga.toml:ro
+    
+    # Healthcheck inherited from Dockerfile
+    # GET http://127.0.0.1:8010/health every 30s
