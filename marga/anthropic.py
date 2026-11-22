@@ -231,7 +231,11 @@ async def translate_openai_stream(
             if text:
                 yield _anthropic_event(
                     "content_block_delta",
-                    {"type": "text_delta", "index": 0, "delta": {"type": "text_delta", "text": text}},
+                    {
+                        "type": "text_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": text},
+                    },
                 )
 
         # Track usage

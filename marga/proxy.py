@@ -75,7 +75,7 @@ logger = logging.getLogger("marga")
 _BACKEND_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
 
 
-class _HookRecovery(Exception):
+class _HookRecoveryError(Exception):
     """Internal signal: an error hook produced a replacement response.
 
     Attributes:
@@ -416,7 +416,9 @@ class Proxy:
             response_model=ChatCompletionResponse,
             tags=["openai"],
             summary="Chat completions",
-            response_description="OpenAI-compatible completion (or an SSE stream when stream=true).",
+            response_description=(
+                "OpenAI-compatible completion (or an SSE stream when stream=true)."
+            ),
             responses={
                 400: {"description": "Routing decision named an unknown backend."},
                 429: {"description": "Every backend is out of budget."},
