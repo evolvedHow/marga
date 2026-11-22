@@ -30,11 +30,21 @@ class ChatMessage(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    role: ChatRole
-    content: str | list[dict[str, Any]] | None = None
-    name: str | None = None
-    tool_call_id: str | None = None
-    tool_calls: list[dict[str, Any]] | None = None
+    role: ChatRole = Field(
+        description="Author of the message (system, user, assistant, tool, developer, function)"
+    )
+    content: str | list[dict[str, Any]] | None = Field(
+        default=None, description="Message text or multimodal content parts"
+    )
+    name: str | None = Field(
+        default=None, description="Optional author name for function/multi-agent flows"
+    )
+    tool_call_id: str | None = Field(
+        default=None, description="Identifier linking a tool message to its call"
+    )
+    tool_calls: list[dict[str, Any]] | None = Field(
+        default=None, description="Tool invocations requested by the assistant"
+    )
 
 
 class ChatCompletionRequest(BaseModel):
@@ -51,11 +61,28 @@ class ChatCompletionRequest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    model: str = ""
-    messages: list[ChatMessage] = Field(min_length=1)
-    stream: bool = False
-    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
-    max_tokens: int | None = Field(default=None, ge=1)
+    model: str = Field(
+        default="",
+        description=(
+            "Model identifier (e.g., 'gpt-4o', 'llama3.2-1b'). "
+            "Empty means router picks any available model"
+        ),
+    )
+    messages: list[ChatMessage] = Field(
+        min_length=1, description="Chat message history (at least one message required)"
+    )
+    stream: bool = Field(
+        default=False, description="Whether to stream the response as Server-Sent Events"
+    )
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature (0.0-2.0). Controls randomness of responses",
+    )
+    max_tokens: int | None = Field(
+        default=None, ge=1, description="Maximum tokens to generate in the response"
+    )
 
 
 class ChoiceMessage(BaseModel):
@@ -69,9 +96,13 @@ class ChoiceMessage(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    role: Literal["assistant"] = "assistant"
-    content: str | None = None
-    tool_calls: list[dict[str, Any]] | None = None
+    role: Literal["assistant"] = Field(
+        default="assistant", description="Message role (always 'assistant')"
+    )
+    content: str | None = Field(default=None, description="Generated response text")
+    tool_calls: list[dict[str, Any]] | None = Field(
+        default=None, description="Tool/function calls requested by the model"
+    )
 
 
 class Choice(BaseModel):
@@ -85,9 +116,11 @@ class Choice(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    index: int = 0
-    message: ChoiceMessage
-    finish_reason: str | None = None
+    index: int = Field(default=0, ge=0, description="Index of this choice in the response")
+    message: ChoiceMessage = Field(description="The generated assistant message")
+    finish_reason: str | None = Field(
+        default=None, description="Reason generation stopped (stop, length, tool_calls, etc.)"
+    )
 
 
 class Usage(BaseModel):
@@ -101,9 +134,11 @@ class Usage(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: int = Field(default=0, ge=0, description="Number of tokens in the input prompt")
+    completion_tokens: int = Field(
+        default=0, ge=0, description="Number of tokens generated in the response"
+    )
+    total_tokens: int = Field(default=0, ge=0, description="Total tokens (prompt + completion)")
 
 
 class ChatCompletionResponse(BaseModel):
@@ -120,12 +155,19 @@ class ChatCompletionResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    id: str
-    object: Literal["chat.completion"] = "chat.completion"
-    created: int = Field(default_factory=lambda: int(time.time()))
-    model: str
-    choices: list[Choice]
-    usage: Usage | None = None
+    id: str = Field(description="Unique identifier assigned by the backend")
+    object: Literal["chat.completion"] = Field(
+        default="chat.completion", description="Object type identifier"
+    )
+    created: int = Field(
+        default_factory=lambda: int(time.time()),
+        description="Unix timestamp when the completion was created",
+    )
+    model: str = Field(description="The model that generated the response (after routing)")
+    choices: list[Choice] = Field(description="Array of completion choices (typically one)")
+    usage: Usage | None = Field(
+        default=None, description="Token usage accounting (if provided by backend)"
+    )
 
 
 class DeltaMessage(BaseModel):

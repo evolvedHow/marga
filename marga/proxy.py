@@ -316,6 +316,9 @@ class Proxy:
                 "cheapest/least-used backend, optionally constrained by free-tier "
                 "or spend budgets, with before/after hooks around every call."
             ),
+            docs_url="/docs",
+            redoc_url="/redoc",
+            openapi_url="/openapi.json",
             lifespan=lifespan,
         )
 
