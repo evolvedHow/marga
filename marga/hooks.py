@@ -236,9 +236,7 @@ class HookManager:
             await maybe_await(hook(ctx))
         return ctx
 
-    async def run_after(
-        self, ctx: HookContext, response: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def run_after(self, ctx: HookContext, response: dict[str, Any]) -> dict[str, Any]:
         """Run every after hook in registration order.
 
         Args:
@@ -254,9 +252,7 @@ class HookManager:
                 response = result
         return response
 
-    async def run_error(
-        self, ctx: HookContext, error: BaseException
-    ) -> dict[str, Any] | None:
+    async def run_error(self, ctx: HookContext, error: BaseException) -> dict[str, Any] | None:
         """Run every error hook until one recovers the request.
 
         Args:

@@ -126,9 +126,7 @@ def anthropic_to_openai(request: AnthropicRequest) -> dict[str, Any]:
     return openai_request
 
 
-def openai_to_anthropic(
-    openai_response: dict[str, Any], model: str
-) -> dict[str, Any]:
+def openai_to_anthropic(openai_response: dict[str, Any], model: str) -> dict[str, Any]:
     """Translate OpenAI response to Anthropic format.
 
     Args:
@@ -221,9 +219,7 @@ async def translate_openai_stream(
         # Start content block on first content
         if "content" in delta and not content_started:
             content_started = True
-            yield _anthropic_event(
-                "content_block_start", {"type": "text", "index": 0, "text": ""}
-            )
+            yield _anthropic_event("content_block_start", {"type": "text", "index": 0, "text": ""})
 
         # Send content delta
         if "content" in delta:

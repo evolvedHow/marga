@@ -226,9 +226,7 @@ class Router:
             exclude={primary[0].name},
         )
         candidates = [primary]
-        candidates.extend(
-            (backend, self.resolve_model(backend, ctx.model)) for backend in order
-        )
+        candidates.extend((backend, self.resolve_model(backend, ctx.model)) for backend in order)
         return candidates
 
     async def _failover_order(self, requested: str, exclude: set[str]) -> list[Backend]:
@@ -353,9 +351,7 @@ class Router:
             }
         return stats
 
-    async def remaining_budget(
-        self, backend_name: str, period: str = "month"
-    ) -> dict[str, Any]:
+    async def remaining_budget(self, backend_name: str, period: str = "month") -> dict[str, Any]:
         """Report recorded usage for one backend and reporting period.
 
         Args:

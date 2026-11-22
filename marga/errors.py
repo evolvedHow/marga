@@ -156,7 +156,6 @@ def error_detail(error: Exception) -> Any:
         payload["backends"] = error.backend_names
     if isinstance(error, AllBackendsFailedError):
         payload["attempts"] = [
-            {"backend": attempt.backend, "error": str(attempt.cause)}
-            for attempt in error.attempts
+            {"backend": attempt.backend, "error": str(attempt.cause)} for attempt in error.attempts
         ]
     return payload

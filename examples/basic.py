@@ -5,18 +5,20 @@ import os
 from marga import Proxy
 
 # Create proxy with multiple backends
-proxy = Proxy(backends={
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
-        "models": ["gpt-4o", "gpt-4o-mini"]
-    },
-    "local": {
-        "base_url": "http://127.0.0.1:8080/v1",
-        "api_key": "",  # Local usually doesn't need key
-        "models": ["qwen2.5-coder", "llama3.2-1b"]
+proxy = Proxy(
+    backends={
+        "openai": {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": os.getenv("OPENAI_API_KEY", ""),
+            "models": ["gpt-4o", "gpt-4o-mini"],
+        },
+        "local": {
+            "base_url": "http://127.0.0.1:8080/v1",
+            "api_key": "",  # Local usually doesn't need key
+            "models": ["qwen2.5-coder", "llama3.2-1b"],
+        },
     }
-})
+)
 
 
 # Example 1: Custom routing logic
@@ -41,14 +43,17 @@ def add_rag_context(ctx):
     """
     # Example: Add system message with retrieved context
     if any("quantum" in msg.get("content", "").lower() for msg in ctx.messages):
-        ctx.messages.insert(0, {
-            "role": "system",
-            "content": (
-                "Relevant context from knowledge base:\n"
-                "- Quantum entanglement is a quantum mechanical phenomenon...\n"
-                "- Use this context to answer the user's question."
-            )
-        })
+        ctx.messages.insert(
+            0,
+            {
+                "role": "system",
+                "content": (
+                    "Relevant context from knowledge base:\n"
+                    "- Quantum entanglement is a quantum mechanical phenomenon...\n"
+                    "- Use this context to answer the user's question."
+                ),
+            },
+        )
 
     # Store metadata for later use
     ctx.metadata["rag_injected"] = True
@@ -74,10 +79,9 @@ def enforce_system_prompt(ctx):
     has_system = any(msg.get("role") == "system" for msg in ctx.messages)
 
     if not has_system:
-        ctx.messages.insert(0, {
-            "role": "system",
-            "content": "You are a helpful, concise assistant."
-        })
+        ctx.messages.insert(
+            0, {"role": "system", "content": "You are a helpful, concise assistant."}
+        )
 
 
 if __name__ == "__main__":

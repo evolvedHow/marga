@@ -386,7 +386,7 @@ class Proxy:
                 "all",
                 pattern="^(all|month|day)$",
                 description="Reporting window for the counters.",
-            )
+            ),
         ) -> StatsResponse:
             """Return per-backend call, token and cost counters."""
             return StatsResponse(backends=await self.router.get_stats(period=period))

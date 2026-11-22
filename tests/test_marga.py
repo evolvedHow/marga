@@ -8,12 +8,9 @@ from marga import HookContext, Proxy
 @pytest.mark.asyncio
 async def test_basic_routing():
     """Test basic router initialization and routing."""
-    proxy = Proxy(backends={
-        "test": {
-            "base_url": "http://localhost:8080/v1",
-            "models": ["test-model"]
-        }
-    })
+    proxy = Proxy(
+        backends={"test": {"base_url": "http://localhost:8080/v1", "models": ["test-model"]}}
+    )
 
     ctx = HookContext(messages=[], model="test-model")
     backend, model = await proxy.router.route(ctx)
@@ -25,10 +22,12 @@ async def test_basic_routing():
 @pytest.mark.asyncio
 async def test_custom_router():
     """Test custom routing function."""
-    proxy = Proxy(backends={
-        "fast": {"base_url": "http://fast/v1", "models": ["fast-model"]},
-        "slow": {"base_url": "http://slow/v1", "models": ["slow-model"]}
-    })
+    proxy = Proxy(
+        backends={
+            "fast": {"base_url": "http://fast/v1", "models": ["fast-model"]},
+            "slow": {"base_url": "http://slow/v1", "models": ["slow-model"]},
+        }
+    )
 
     @proxy.route
     async def custom(ctx):
@@ -85,10 +84,12 @@ async def test_after_hooks():
 @pytest.mark.asyncio
 async def test_usage_tracking():
     """Test usage statistics tracking."""
-    proxy = Proxy(backends={
-        "backend1": {"base_url": "http://b1/v1"},
-        "backend2": {"base_url": "http://b2/v1"}
-    })
+    proxy = Proxy(
+        backends={
+            "backend1": {"base_url": "http://b1/v1"},
+            "backend2": {"base_url": "http://b2/v1"},
+        }
+    )
 
     await proxy.router.record_usage("backend1", tokens=100)
     await proxy.router.record_usage("backend1", tokens=200)
@@ -107,10 +108,12 @@ async def test_least_used_routing():
     """Test least-used backend selection."""
     from marga import least_used
 
-    proxy = Proxy(backends={
-        "backend1": {"base_url": "http://b1/v1", "models": ["m1"]},
-        "backend2": {"base_url": "http://b2/v1", "models": ["m2"]}
-    })
+    proxy = Proxy(
+        backends={
+            "backend1": {"base_url": "http://b1/v1", "models": ["m1"]},
+            "backend2": {"base_url": "http://b2/v1", "models": ["m2"]},
+        }
+    )
     proxy.route(least_used())
 
     # Record usage on backend1
@@ -127,7 +130,7 @@ def test_token_estimation():
     """Test token estimation."""
     messages = [
         {"role": "user", "content": "a" * 400},  # ~100 tokens
-        {"role": "assistant", "content": "b" * 800}  # ~200 tokens
+        {"role": "assistant", "content": "b" * 800},  # ~200 tokens
     ]
 
     ctx = HookContext(messages=messages, model="test")

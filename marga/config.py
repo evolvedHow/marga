@@ -129,6 +129,5 @@ def proxy_from_env(**overrides: Any) -> "Proxy":  # noqa: F821
         return Proxy(name=name, backends=backends, vault_context=vault_context, **overrides)
 
     raise ValueError(
-        "No configuration found. Set MARGA_CONFIG (TOML path) or "
-        "MARGA_BACKENDS (JSON object)"
+        "No configuration found. Set MARGA_CONFIG (TOML path) or MARGA_BACKENDS (JSON object)"
     )

@@ -218,9 +218,7 @@ class VaultClient:
         payload = _json_object(response, source=f"{resolved}/*")
         secrets = payload.get("secrets", [])
         keys = [
-            str(item.get("key"))
-            for item in secrets
-            if isinstance(item, dict) and item.get("key")
+            str(item.get("key")) for item in secrets if isinstance(item, dict) and item.get("key")
         ]
         return sorted(keys)
 

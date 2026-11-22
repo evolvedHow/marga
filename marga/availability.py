@@ -122,9 +122,7 @@ class AvailabilityChecker:
                 reason=f"connection failed: {type(e).__name__}",
             )
         except Exception as e:
-            return AvailabilityResult(
-                reachable=False, checked_at=now, reason=f"probe error: {e}"
-            )
+            return AvailabilityResult(reachable=False, checked_at=now, reason=f"probe error: {e}")
 
     def invalidate(self, backend_name: str) -> None:
         """Remove cached availability for a backend.
