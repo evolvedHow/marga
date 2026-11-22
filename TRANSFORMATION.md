@@ -311,8 +311,8 @@ All core functionality tested and working.
 2. **QUICKSTART.md** - Get started in 60 seconds
 3. **COMPARISON.md** - Detailed margAI vs marga
 4. **SUMMARY.md** - Project summary
-5. **example.py** - Complete working example
-6. **test_marga.py** - Comprehensive tests
+5. **examples/basic.py** - Working example
+6. **tests/test_marga.py** - Test suite
 
 ## The Verdict
 
@@ -329,7 +329,7 @@ All core functionality tested and working.
 
 ## Next Steps
 
-1. **Try it**: `cd marga && python example.py`
+1. **Try it**: `python examples/basic.py`
 2. **Test it**: `curl http://127.0.0.1:8000/health`
 3. **Use it**: Point your homelab at `http://127.0.0.1:8000/v1`
 
