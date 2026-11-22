@@ -38,7 +38,7 @@ margAI became too complex as it evolved into a programmer's framework with:
 ```
 Client (OpenAI SDK, curl, etc)
     ↓
-marga (127.0.0.1:8000)
+marga (127.0.0.1:8010)
     ↓
 [@proxy.before hooks] ← RAG, prompt injection
     ↓
@@ -56,20 +56,25 @@ Client
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]},
-    "openai": {"base_url": "https://api.openai.com/v1", "api_key": "sk-..."}
-})
+proxy = Proxy(
+    backends={
+        "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]},
+        "openai": {"base_url": "https://api.openai.com/v1", "api_key": "sk-..."},
+    }
+)
+
 
 @proxy.route
 def smart_route(ctx):
     return "local/qwen2.5-coder" if ctx.estimated_tokens < 2000 else "openai/gpt-4o-mini"
 
+
 @proxy.before
 def add_rag(ctx):
     ctx.messages.insert(0, {"role": "system", "content": "Retrieved context..."})
 
-proxy.serve()  # Start on port 8000
+
+proxy.serve()  # Start on port 8010
 ```
 
 **Total: ~15 lines for complete routing + RAG proxy**
@@ -163,8 +168,8 @@ $ pytest tests/test_marga.py -v
 ## Next Steps
 
 1. **Try it**: `python examples/basic.py`
-2. **Test it**: `curl http://127.0.0.1:8000/health`
-3. **Integrate it**: Point your homelab services at `http://127.0.0.1:8000/v1`
+2. **Test it**: `curl http://127.0.0.1:8010/health`
+3. **Integrate it**: Point your homelab services at `http://127.0.0.1:8010/v1`
 
 ## Documentation
 

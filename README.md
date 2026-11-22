@@ -43,7 +43,7 @@ models = ["qwen2.5-coder:7b"]
 [backends.anthropic]
 base_url = "https://api.anthropic.com/v1"
 api_key_secret = "KEY_ANTHROPIC"  # Read from vault
-models = ["claude-3-5-sonnet-20241022"]
+models = ["claude-sonnet-5-5"]
 
 [backends.openai]
 base_url = "https://api.openai.com/v1"
@@ -171,7 +171,7 @@ Worker automatically:
 curl -X POST http://localhost:8010/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "claude-sonnet-5-5",
     "messages": [{"role": "user", "content": "Hello"}],
     "stream": false
   }'
@@ -188,7 +188,7 @@ curl -X POST http://localhost:8010/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-marga-auth-token" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "claude-sonnet-5-5",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello"}]
   }'
@@ -246,21 +246,26 @@ from marga import Proxy, least_used, round_robin, cheapest, budget
 proxy = Proxy.from_toml("marga.toml")
 
 # Built-in strategies
-proxy.route(least_used())          # Fewest calls
-proxy.route(round_robin())         # Even distribution
-proxy.route(cheapest())            # Lowest cost_per_1k_tokens
+proxy.route(least_used())  # Fewest calls
+proxy.route(round_robin())  # Even distribution
+proxy.route(cheapest())  # Lowest cost_per_1k_tokens
 
 # Budget limits
-proxy.route(budget([
-    {"backend": "openai", "limit": 1000000, "period": "month"},
-]))
+proxy.route(
+    budget(
+        [
+            {"backend": "openai", "limit": 1000000, "period": "month"},
+        ]
+    )
+)
+
 
 # Custom routing
 @proxy.route
 async def custom(ctx):
     if ctx.estimated_tokens < 1000:
         return "llama/qwen2.5-coder:7b"  # Fast local
-    return "anthropic/claude-3-5-haiku-20241022"  # Cloud fallback
+    return "anthropic/claude-haiku-5-5"  # Cloud fallback
 ```
 
 ## Hooks
@@ -269,10 +274,8 @@ async def custom(ctx):
 @proxy.before
 async def add_rag_context(ctx):
     """Inject RAG context before LLM."""
-    ctx.messages.insert(0, {
-        "role": "system",
-        "content": f"Context: {retrieve_relevant_docs(ctx)}"
-    })
+    ctx.messages.insert(0, {"role": "system", "content": f"Context: {retrieve_relevant_docs(ctx)}"})
+
 
 @proxy.after
 async def track_usage(ctx, response):
@@ -280,6 +283,7 @@ async def track_usage(ctx, response):
     usage = response.get("usage", {})
     print(f"[{ctx.model}] {usage.get('total_tokens', 0)} tokens")
     return response
+
 
 @proxy.error
 async def fallback_handler(ctx, error):

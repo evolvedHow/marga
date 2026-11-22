@@ -18,14 +18,14 @@ uv pip install -e .
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]}
-})
+proxy = Proxy(
+    backends={"local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]}}
+)
 
-proxy.serve()  # Starts on http://127.0.0.1:8000
+proxy.serve()  # Starts on http://127.0.0.1:8010
 ```
 
-**That's it!** Point any OpenAI client at `http://127.0.0.1:8000/v1`.
+**That's it!** Point any OpenAI client at `http://127.0.0.1:8010/v1`.
 
 ## Complete Example (with routing + RAG)
 
@@ -36,17 +36,17 @@ from marga import Proxy
 import os
 
 # Configure backends
-proxy = Proxy(backends={
-    "local": {
-        "base_url": "http://127.0.0.1:8080/v1",
-        "models": ["qwen2.5-coder"]
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "models": ["gpt-4o-mini", "gpt-4o"]
+proxy = Proxy(
+    backends={
+        "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]},
+        "openai": {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": os.getenv("OPENAI_API_KEY"),
+            "models": ["gpt-4o-mini", "gpt-4o"],
+        },
     }
-})
+)
+
 
 # Add smart routing
 @proxy.route
@@ -56,18 +56,19 @@ def smart_route(ctx):
         return "local/qwen2.5-coder"
     return "openai/gpt-4o-mini"
 
+
 # Add RAG hook
 @proxy.before
 def inject_rag_context(ctx):
     """Add relevant context before sending to LLM."""
     # In real usage, query your vector DB here
     user_msg = ctx.messages[-1]["content"]
-    
+
     if "quantum" in user_msg.lower():
-        ctx.messages.insert(0, {
-            "role": "system",
-            "content": "Context: Quantum computing uses qubits..."
-        })
+        ctx.messages.insert(
+            0, {"role": "system", "content": "Context: Quantum computing uses qubits..."}
+        )
+
 
 # Log responses
 @proxy.after
@@ -77,9 +78,10 @@ def log_usage(ctx, response):
     print(f"Used {tokens} tokens via {ctx.model}")
     return response
 
+
 # Start server
 if __name__ == "__main__":
-    proxy.serve(host="127.0.0.1", port=8000)
+    proxy.serve(host="127.0.0.1", port=8010)
 ```
 
 Run it:
@@ -91,10 +93,10 @@ python my_proxy.py
 
 ```bash
 # List models
-curl http://127.0.0.1:8000/v1/models
+curl http://127.0.0.1:8010/v1/models
 
 # Send request
-curl http://127.0.0.1:8000/v1/chat/completions \
+curl http://127.0.0.1:8010/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o-mini",
@@ -102,7 +104,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   }'
 
 # Check stats
-curl http://127.0.0.1:8000/stats
+curl http://127.0.0.1:8010/stats
 ```
 
 ## Use with OpenAI SDK
@@ -111,13 +113,13 @@ curl http://127.0.0.1:8000/stats
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",
-    api_key="not-needed"  # marga doesn't require auth
+    base_url="http://127.0.0.1:8010/v1",
+    api_key="not-needed",  # marga doesn't require auth
 )
 
 response = client.chat.completions.create(
     model="gpt-4o-mini",  # Routes via your smart_route function
-    messages=[{"role": "user", "content": "Hello!"}]
+    messages=[{"role": "user", "content": "Hello!"}],
 )
 
 print(response.choices[0].message.content)
@@ -190,9 +192,9 @@ Backend config structure:
 ```python
 {
     "backend_name": {
-        "base_url": "http://...",     # Required
-        "api_key": "sk-...",           # Optional (default: "")
-        "models": ["model1", "model2"] # Optional (default: [])
+        "base_url": "http://...",  # Required
+        "api_key": "sk-...",  # Optional (default: "")
+        "models": ["model1", "model2"],  # Optional (default: [])
     }
 }
 ```
@@ -210,7 +212,7 @@ COPY my_proxy.py /app/
 
 RUN pip install -e marga/
 
-EXPOSE 8000
+EXPOSE 8010
 CMD ["python", "my_proxy.py"]
 ```
 
@@ -218,7 +220,7 @@ Run:
 
 ```bash
 docker build -t my-marga-proxy .
-docker run -p 127.0.0.1:8000:8000 my-marga-proxy
+docker run -p 127.0.0.1:8010:8010 my-marga-proxy
 ```
 
 ## Environment-Based Config
@@ -226,13 +228,15 @@ docker run -p 127.0.0.1:8000:8000 my-marga-proxy
 ```python
 import os
 
-proxy = Proxy(backends={
-    "openai": {
-        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "models": os.getenv("OPENAI_MODELS", "gpt-4o,gpt-4o-mini").split(",")
+proxy = Proxy(
+    backends={
+        "openai": {
+            "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            "api_key": os.getenv("OPENAI_API_KEY"),
+            "models": os.getenv("OPENAI_MODELS", "gpt-4o,gpt-4o-mini").split(","),
+        }
     }
-})
+)
 ```
 
 ## Homelab Integration
@@ -246,7 +250,7 @@ endpoints:
   custom:
     - name: "marga"
       apiKey: "not-needed"
-      baseURL: "http://127.0.0.1:8000/v1"
+      baseURL: "http://127.0.0.1:8010/v1"
       models:
         default: ["gpt-4o-mini", "qwen2.5-coder"]
 ```
@@ -262,7 +266,7 @@ In `~/.continue/config.json`:
       "title": "marga",
       "provider": "openai",
       "model": "gpt-4o-mini",
-      "apiBase": "http://127.0.0.1:8000/v1",
+      "apiBase": "http://127.0.0.1:8010/v1",
       "apiKey": "not-needed"
     }
   ]
@@ -272,7 +276,7 @@ In `~/.continue/config.json`:
 ### With Cursor
 
 Settings → Models → Add Model:
-- Base URL: `http://127.0.0.1:8000/v1`
+- Base URL: `http://127.0.0.1:8010/v1`
 - API Key: `not-needed`
 
 ## Advanced: RAG with ChromaDB
@@ -286,25 +290,20 @@ chroma_client = chromadb.Client()
 collection = chroma_client.create_collection("my_docs")
 
 # Add documents
-collection.add(
-    documents=["Quantum computing uses qubits...", "AI is..."],
-    ids=["doc1", "doc2"]
-)
+collection.add(documents=["Quantum computing uses qubits...", "AI is..."], ids=["doc1", "doc2"])
 
 proxy = Proxy(backends={...})
+
 
 @proxy.before
 def add_rag(ctx):
     """Retrieve relevant context from ChromaDB."""
     query = ctx.messages[-1]["content"]
     results = collection.query(query_texts=[query], n_results=3)
-    
+
     if results["documents"]:
         context = "\n".join(results["documents"][0])
-        ctx.messages.insert(0, {
-            "role": "system",
-            "content": f"Relevant context:\n{context}"
-        })
+        ctx.messages.insert(0, {"role": "system", "content": f"Relevant context:\n{context}"})
 ```
 
 ## Performance Tips

@@ -132,13 +132,16 @@ from margAI.config import load_config
 app = Gateway()
 
 from margAI import install_bangtags
+
 install_bangtags(app, namespace="myapp")
+
 
 @app.marglet("rag", summary="Add RAG")
 def rag(ctx, tag):
     query = tag.value or ctx.user_message()
     docs = search(query)
     ctx.add_system(docs)
+
 
 app.serve()
 
@@ -149,14 +152,14 @@ app.serve()
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "local": {"base_url": "http://127.0.0.1:8080/v1"}
-})
+proxy = Proxy(backends={"local": {"base_url": "http://127.0.0.1:8080/v1"}})
+
 
 @proxy.before
 def add_rag(ctx):
     docs = search(ctx.messages[-1]["content"])
     ctx.messages.insert(0, {"role": "system", "content": docs})
+
 
 proxy.serve()
 
@@ -216,34 +219,33 @@ from marga import Proxy
 import os
 
 # Setup
-proxy = Proxy(backends={
-    "local": {
-        "base_url": "http://127.0.0.1:8080/v1",
-        "models": ["qwen2.5-coder"]
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "models": ["gpt-4o-mini"]
+proxy = Proxy(
+    backends={
+        "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]},
+        "openai": {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": os.getenv("OPENAI_API_KEY"),
+            "models": ["gpt-4o-mini"],
+        },
     }
-})
+)
+
 
 # Route intelligently
 @proxy.route
 def smart_route(ctx):
     if ctx.estimated_tokens < 2000:
         return "local/qwen2.5-coder"  # Small requests → local
-    return "openai/gpt-4o-mini"        # Large requests → OpenAI
+    return "openai/gpt-4o-mini"  # Large requests → OpenAI
+
 
 # Add RAG
 @proxy.before
 def inject_rag(ctx):
     query = ctx.messages[-1]["content"]
     docs = vector_db.search(query)
-    ctx.messages.insert(0, {
-        "role": "system",
-        "content": f"Context: {docs}"
-    })
+    ctx.messages.insert(0, {"role": "system", "content": f"Context: {docs}"})
+
 
 # Log usage
 @proxy.after
@@ -252,13 +254,14 @@ def log_usage(ctx, response):
     print(f"{tokens} tokens via {ctx.model}")
     return response
 
+
 # Start
-proxy.serve(host="127.0.0.1", port=8000)
+proxy.serve(host="127.0.0.1", port=8010)
 ```
 
 **Everything you need in 30 lines.**
 
-Now any homelab service talks to `http://127.0.0.1:8000/v1` and gets:
+Now any homelab service talks to `http://127.0.0.1:8010/v1` and gets:
 - Smart routing (local vs OpenAI based on size)
 - RAG injection (automatic context retrieval)
 - Usage logging (track what's happening)
@@ -330,8 +333,8 @@ All core functionality tested and working.
 ## Next Steps
 
 1. **Try it**: `python examples/basic.py`
-2. **Test it**: `curl http://127.0.0.1:8000/health`
-3. **Use it**: Point your homelab at `http://127.0.0.1:8000/v1`
+2. **Test it**: `curl http://127.0.0.1:8010/health`
+3. **Use it**: Point your homelab at `http://127.0.0.1:8010/v1`
 
 ## Final Thought
 

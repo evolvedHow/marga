@@ -85,8 +85,8 @@ def enforce_system_prompt(ctx):
 
 
 if __name__ == "__main__":
-    # Start server on localhost:8000
-    print("Starting marga proxy on http://127.0.0.1:8000")
+    # Start server on localhost:8010
+    print("Starting marga proxy on http://127.0.0.1:8010")
     print("\nEndpoints:")
     print("  POST /v1/chat/completions  - Chat completions (OpenAI compatible)")
     print("  GET  /v1/models            - List available models")
@@ -94,4 +94,4 @@ if __name__ == "__main__":
     print("  GET  /stats                - Usage statistics")
     print("\nPress Ctrl+C to stop")
 
-    proxy.serve(host="127.0.0.1", port=8000)
+    proxy.serve(host="127.0.0.1", port=8010)

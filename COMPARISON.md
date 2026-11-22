@@ -82,7 +82,9 @@ app = Gateway()  # Reads margAI.toml
 
 # Install bangtags
 from margAI import install_bangtags
+
 install_bangtags(app, namespace="myapp")
+
 
 # Register marglet
 @app.marglet("rag", summary="Add RAG context")
@@ -90,6 +92,7 @@ def rag(ctx, tag):
     query = tag.value or ctx.user_message()
     docs = vector_db.search(query)
     ctx.add_system(f"Context:\n{docs}")
+
 
 # User sends:
 # !myapp: rag=quantum
@@ -101,14 +104,14 @@ def rag(ctx, tag):
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "openai": {"base_url": "...", "api_key": "sk-..."}
-})
+proxy = Proxy(backends={"openai": {"base_url": "...", "api_key": "sk-..."}})
+
 
 @proxy.before
 def add_rag(ctx):
     docs = vector_db.search(ctx.messages[-1]["content"])
     ctx.messages.insert(0, {"role": "system", "content": docs})
+
 
 # User just sends normal OpenAI request
 # No special syntax needed
@@ -172,9 +175,11 @@ from margAI import Gateway
 
 app = Gateway()
 
+
 @app.before("rag")
 def add_rag(ctx, tag):
     ctx.add_system("context...")
+
 
 @app.tag("fast")
 def route_fast(ctx, tag):
@@ -186,13 +191,13 @@ def route_fast(ctx, tag):
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["llama"]}
-})
+proxy = Proxy(backends={"local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["llama"]}})
+
 
 @proxy.before
 def add_rag(ctx):
     ctx.messages.insert(0, {"role": "system", "content": "context..."})
+
 
 @proxy.route
 def route_fast(ctx):
@@ -264,17 +269,17 @@ No `python-multipart` (don't need forms), relaxed version requirements.
 ```python
 from marga import Proxy
 
-proxy = Proxy(backends={
-    "local": {
-        "base_url": "http://127.0.0.1:8080/v1",
-        "models": ["qwen2.5-coder"]
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "models": ["gpt-4o-mini"]
+proxy = Proxy(
+    backends={
+        "local": {"base_url": "http://127.0.0.1:8080/v1", "models": ["qwen2.5-coder"]},
+        "openai": {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": os.getenv("OPENAI_API_KEY"),
+            "models": ["gpt-4o-mini"],
+        },
     }
-})
+)
+
 
 # Route large requests to OpenAI, small to local
 @proxy.route
@@ -283,6 +288,7 @@ def smart_route(ctx):
         return "openai/gpt-4o-mini"
     return "local/qwen2.5-coder"
 
+
 # Optional RAG
 @proxy.before
 def maybe_add_rag(ctx):
@@ -290,7 +296,8 @@ def maybe_add_rag(ctx):
         docs = retrieve_docs(ctx.messages[-1]["content"])
         ctx.messages.insert(0, {"role": "system", "content": docs})
 
-proxy.serve(host="127.0.0.1", port=8000)
+
+proxy.serve(host="127.0.0.1", port=8010)
 ```
 
 **Total code: ~25 lines**  

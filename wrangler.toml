@@ -32,4 +32,4 @@ MARGA_RUNTIME = "cloud"  # Force cloud runtime detection
 # Or mount from a file / use vars (but secrets are safer for keys)
 #
 # Example MARGA_BACKENDS value (single-line JSON):
-# {"anthropic":{"base_url":"https://api.anthropic.com/v1","api_key_secret":"KEY_ANTHROPIC","models":["claude-3-5-sonnet-20241022","claude-3-5-haiku-20241022"]},"openai":{"base_url":"https://api.openai.com/v1","api_key_secret":"KEY_OPENAI","models":["gpt-4o","gpt-4o-mini"]},"groq":{"base_url":"https://api.groq.com/openai/v1","api_key_secret":"KEY_GROQ","models":["llama-3.3-70b-versatile"]}}
+# {"anthropic":{"base_url":"https://api.anthropic.com/v1","api_key_secret":"KEY_ANTHROPIC","models":["claude-sonnet-5-5","claude-haiku-5-5"]},"openai":{"base_url":"https://api.openai.com/v1","api_key_secret":"KEY_OPENAI","models":["gpt-4o","gpt-4o-mini"]},"groq":{"base_url":"https://api.groq.com/openai/v1","api_key_secret":"KEY_GROQ","models":["llama-3.3-70b-versatile"]}}
