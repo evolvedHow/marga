@@ -1,8 +1,73 @@
 """Tests for marga."""
 
+from typing import Any, Mapping
+
 import pytest
+from fastapi.testclient import TestClient
 
 from marga import HookContext, Proxy
+from marga.anthropic import translate_openai_stream
+from marga.transport import Transport
+
+
+class StubTransport(Transport):
+    """Transport returning a canned OpenAI-style completion, never touching the network."""
+
+    def __init__(self) -> None:
+        """Create the stub and remember the last request body."""
+        super().__init__()
+        self.last_body: dict[str, Any] = {}
+        self.last_base_url = ""
+
+    async def complete(
+        self,
+        base_url: str,
+        api_key: str = "",
+        body: dict[str, Any] | None = None,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Return a fixed completion and record the request body.
+
+        Args:
+            base_url: Ignored.
+            api_key: Ignored.
+            body: Request body to record.
+            headers: Ignored.
+
+        Returns:
+            An OpenAI-compatible completion payload.
+        """
+        self.last_body = dict(body or {})
+        self.last_base_url = base_url
+        return {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 1,
+            "model": self.last_body.get("model", "test-model"),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "pong"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        }
+
+
+def _client() -> tuple[TestClient, StubTransport]:
+    """Build a TestClient over a proxy with a stub backend.
+
+    Returns:
+        The client and the stub transport used by the proxy.
+    """
+    transport = StubTransport()
+    proxy = Proxy(
+        backends={"test": {"base_url": "http://test/v1", "models": ["test-model"]}},
+        transport=transport,
+    )
+    return TestClient(proxy.build_app()), transport
 
 
 @pytest.mark.asyncio
@@ -135,6 +200,207 @@ def test_token_estimation():
 
     ctx = HookContext(messages=messages, model="test")
     assert ctx.estimated_tokens == 300  # (400 + 800) / 4
+
+
+def test_openapi_schema_builds():
+    """/openapi.json must render and document every public route."""
+    client, _ = _client()
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    for path in ("/health", "/v1/models", "/v1/chat/completions", "/v1/messages"):
+        assert path in paths
+    assert client.get("/docs").status_code == 200
+    assert client.get("/redoc").status_code == 200
+
+
+def test_chat_completions_endpoint():
+    """OpenAI-style endpoint routes to the backend and returns its completion."""
+    client, transport = _client()
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "test-model", "messages": [{"role": "user", "content": "ping"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "pong"
+    assert transport.last_body["messages"][0]["content"] == "ping"
+
+
+def test_chat_completions_validation():
+    """Invalid bodies are rejected with 422."""
+    client, _ = _client()
+    assert client.post("/v1/chat/completions", json={"messages": []}).status_code == 422
+    bad_temp = {"messages": [{"role": "user", "content": "x"}], "temperature": 9}
+    assert client.post("/v1/chat/completions", json=bad_temp).status_code == 422
+
+
+def test_anthropic_messages_endpoint():
+    """/v1/messages parses the JSON body and translates both directions."""
+    client, transport = _client()
+    response = client.post(
+        "/v1/messages",
+        json={
+            "model": "test-model",
+            "max_tokens": 16,
+            "system": "Be brief",
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["type"] == "message"
+    assert data["content"][0]["text"] == "pong"
+    assert data["usage"] == {"input_tokens": 3, "output_tokens": 1}
+    assert transport.last_body["messages"][0] == {"role": "system", "content": "Be brief"}
+
+
+def test_anthropic_messages_validation():
+    """/v1/messages requires max_tokens."""
+    client, _ = _client()
+    response = client.post(
+        "/v1/messages",
+        json={"model": "test-model", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert response.status_code == 422
+
+
+def _two_backend_client() -> tuple[TestClient, StubTransport]:
+    """Build a TestClient over a proxy with two declared backends.
+
+    Returns:
+        The client and the stub transport used by the proxy.
+    """
+    transport = StubTransport()
+    proxy = Proxy(
+        backends={
+            "local": {"base_url": "http://local/v1", "models": ["local-model"]},
+            "cloud": {"base_url": "http://cloud/v1", "models": ["cloud-model"]},
+        },
+        transport=transport,
+    )
+    return TestClient(proxy.build_app()), transport
+
+
+@pytest.mark.parametrize(
+    ("requested", "base_url", "sent_model"),
+    [
+        ("cloud/cloud-model", "http://cloud/v1", "cloud-model"),
+        ("cloud-model", "http://cloud/v1", "cloud-model"),
+        ("local/local-model", "http://local/v1", "local-model"),
+        ("local-model", "http://local/v1", "local-model"),
+    ],
+)
+def test_explicit_model_is_honoured(requested: str, base_url: str, sent_model: str):
+    """A requested model pins the backend that serves it, however usage is spread."""
+    client, transport = _two_backend_client()
+    for _ in range(3):
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": requested, "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert response.status_code == 200
+        assert transport.last_base_url == base_url
+        assert transport.last_body["model"] == sent_model
+
+
+def test_unknown_model_falls_back_to_balancing():
+    """An undeclared model id still gets served by some backend."""
+    client, transport = _two_backend_client()
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    assert transport.last_base_url in {"http://local/v1", "http://cloud/v1"}
+
+
+async def _chunks(*parts: bytes):
+    """Yield byte chunks like a network stream would.
+
+    Args:
+        *parts: Chunks to yield in order.
+
+    Yields:
+        Each chunk unchanged.
+    """
+    for part in parts:
+        yield part
+
+
+@pytest.mark.asyncio
+async def test_anthropic_stream_translation_handles_batched_and_split_chunks():
+    """Events batched in one chunk or split across chunks must not be lost."""
+    first = (
+        b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"po'
+    )
+    second = b'ng"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+    third = (
+        b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    out = b"".join(
+        [event async for event in translate_openai_stream(_chunks(first, second, third), "m")]
+    ).decode()
+
+    names = [line[7:] for line in out.splitlines() if line.startswith("event: ")]
+    assert names == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    assert '"text": "pong"' in out
+    assert '"stop_reason": "end_turn"' in out
+    assert '"output_tokens": 2' in out
+    assert '"type": "message_delta"' in out
+
+
+def test_anthropic_messages_streaming_endpoint():
+    """/v1/messages with stream=true returns Anthropic SSE through the full app."""
+
+    class StreamStub(StubTransport):
+        """Stub whose stream yields one batched chunk."""
+
+        async def stream(self, base_url, api_key="", body=None, *, headers=None):
+            """Yield a single chunk holding every OpenAI event.
+
+            Args:
+                base_url: Ignored.
+                api_key: Ignored.
+                body: Ignored.
+                headers: Ignored.
+
+            Yields:
+                One chunk with two events and the DONE sentinel.
+            """
+            yield (
+                b'data: {"choices":[{"delta":{"content":"pong"}}]}\n\n'
+                b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            )
+
+    proxy = Proxy(
+        backends={"test": {"base_url": "http://test/v1", "models": ["test-model"]}},
+        transport=StreamStub(),
+    )
+    client = TestClient(proxy.build_app())
+    response = client.post(
+        "/v1/messages",
+        json={
+            "model": "test-model",
+            "max_tokens": 8,
+            "stream": True,
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: content_block_delta" in response.text
+    assert '"text": "pong"' in response.text
+    assert response.text.rstrip().endswith('data: {"type": "message_stop"}')
 
 
 if __name__ == "__main__":

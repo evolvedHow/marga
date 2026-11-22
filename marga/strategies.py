@@ -88,6 +88,29 @@ def _target_for(router: Router, name: str, ctx: HookContext) -> str:
     return f"{name}/{router.resolve_model(backend, ctx.model)}"
 
 
+def _pinned_names(router: Router, names: list[str], requested: str) -> tuple[list[str], str | None]:
+    """Narrow ``names`` to the backends that match an explicitly requested model.
+
+    Args:
+        router: Router holding the backend table.
+        names: Enabled backend names, in declaration order.
+        requested: Model id from the client; may be empty.
+
+    Returns:
+        ``(names, target)``. ``target`` is a ready ``"backend/model"`` string
+        when ``requested`` is ``"<enabled backend>/<model>"``. Otherwise
+        ``names`` is narrowed to the backends declaring ``requested`` as a
+        model, or returned unchanged when none do (unknown or empty model).
+    """
+    if not requested:
+        return names, None
+    head, _, rest = requested.partition("/")
+    if rest and head in names:
+        return names, requested
+    declaring = [name for name in names if requested in router.backends[name].models]
+    return (declaring or names), None
+
+
 @dataclass
 class LeastUsed:
     """Select the backend with the fewest recorded calls.
@@ -99,6 +122,9 @@ class LeastUsed:
     async def select(self, ctx: HookContext, router: Router) -> str:
         """Pick the enabled backend with the lowest all-time call count.
 
+        An explicit ``"backend/model"`` request is honoured as is, and a bare
+        model id restricts the choice to backends that declare it.
+
         Args:
             ctx: Request context (used to resolve the model).
             router: Router exposing backends and the usage store.
@@ -109,6 +135,9 @@ class LeastUsed:
         names = [name for name in router.backends if _is_enabled(router, name)]
         if not names:
             raise UnknownBackendError("(none)", list(router.backends))
+        names, pinned = _pinned_names(router, names, ctx.model)
+        if pinned is not None:
+            return pinned
         snapshots = await router.store.get_many([usage_key(name) for name in names])
         chosen = names[0]
         fewest = snapshots[usage_key(chosen)].calls

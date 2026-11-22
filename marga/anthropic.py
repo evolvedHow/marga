@@ -7,9 +7,12 @@ Supports streaming with SSE event translation.
 
 from __future__ import annotations
 
+import json
 from typing import Any, AsyncIterator, Literal
 
 from pydantic import BaseModel, Field
+
+from .transport import feed_sse
 
 
 class AnthropicMessage(BaseModel):
@@ -160,15 +163,13 @@ def openai_to_anthropic(openai_response: dict[str, Any], model: str) -> dict[str
 async def translate_openai_stream(
     openai_stream: AsyncIterator[bytes], model: str
 ) -> AsyncIterator[bytes]:
-    """Translate OpenAI SSE stream to Anthropic SSE format.
+    """Translate an OpenAI SSE stream to the Anthropic Messages SSE format.
 
-    Anthropic streaming events:
-    - message_start: Initial message metadata
-    - content_block_start: Start of text block (index 0)
-    - content_block_delta: Text deltas
-    - content_block_stop: End of text block
-    - message_delta: Usage updates
-    - message_stop: Final event
+    Network chunks are re-framed into SSE lines first, so events split across
+    or batched within chunks are handled. The emitted sequence follows the
+    Anthropic spec: ``message_start``, ``content_block_start``, one
+    ``content_block_delta`` per text delta, ``content_block_stop``,
+    ``message_delta`` (stop reason and usage) and ``message_stop``.
 
     Args:
         openai_stream: OpenAI SSE byte stream.
@@ -177,84 +178,64 @@ async def translate_openai_stream(
     Yields:
         Anthropic SSE event bytes.
     """
-    import json
-
     message_id = f"msg-{id(openai_stream)}"
     input_tokens = 0
     output_tokens = 0
     content_started = False
+    stop_reason = "end_turn"
+    buffer = b""
 
-    # Send message_start event
     yield _anthropic_event(
         "message_start",
         {
-            "type": "message",
-            "id": message_id,
-            "role": "assistant",
-            "content": [],
-            "model": model,
-            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": model,
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
         },
     )
 
-    async for chunk_bytes in openai_stream:
-        # Parse OpenAI chunk
-        chunk_str = chunk_bytes.decode("utf-8")
-        if not chunk_str.startswith("data: "):
-            continue
-
-        data_str = chunk_str[6:].strip()
-        if data_str == "[DONE]":
-            break
-
-        try:
-            chunk_data = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
-
-        choice = chunk_data.get("choices", [{}])[0]
-        delta = choice.get("delta", {})
-        finish_reason = choice.get("finish_reason")
-
-        # Start content block on first content
-        if "content" in delta and not content_started:
-            content_started = True
-            yield _anthropic_event("content_block_start", {"type": "text", "index": 0, "text": ""})
-
-        # Send content delta
-        if "content" in delta:
-            text = delta.get("content", "")
-            if text:
-                yield _anthropic_event(
-                    "content_block_delta",
-                    {
-                        "type": "text_delta",
-                        "index": 0,
-                        "delta": {"type": "text_delta", "text": text},
-                    },
-                )
-
-        # Track usage
-        usage = chunk_data.get("usage", {})
-        if usage:
+    async for chunk in openai_stream:
+        buffer, events = feed_sse(buffer, chunk)
+        for event in events:
+            usage = event.get("usage") or {}
             input_tokens = usage.get("prompt_tokens", input_tokens)
             output_tokens = usage.get("completion_tokens", output_tokens)
 
-        # Handle finish
-        if finish_reason:
-            if content_started:
-                yield _anthropic_event("content_block_stop", {"type": "text", "index": 0})
+            choices = event.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            text = (choice.get("delta") or {}).get("content")
+            if text:
+                if not content_started:
+                    content_started = True
+                    yield _anthropic_event(
+                        "content_block_start",
+                        {"index": 0, "content_block": {"type": "text", "text": ""}},
+                    )
+                yield _anthropic_event(
+                    "content_block_delta",
+                    {"index": 0, "delta": {"type": "text_delta", "text": text}},
+                )
+            if choice.get("finish_reason"):
+                stop_reason = _map_finish_reason(choice["finish_reason"])
 
-            yield _anthropic_event(
-                "message_delta",
-                {
-                    "delta": {"stop_reason": _map_finish_reason(finish_reason)},
-                    "usage": {"output_tokens": output_tokens},
-                },
-            )
-            break
-
-    # Send message_stop
+    if content_started:
+        yield _anthropic_event("content_block_stop", {"index": 0})
+    yield _anthropic_event(
+        "message_delta",
+        {
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        },
+    )
     yield _anthropic_event("message_stop", {})
 
 
@@ -262,15 +243,14 @@ def _anthropic_event(event_type: str, data: dict[str, Any]) -> bytes:
     """Format an Anthropic SSE event.
 
     Args:
-        event_type: Event type name.
+        event_type: Event type name; also written into the payload ``type``.
         data: Event data dict.
 
     Returns:
         SSE-formatted bytes.
     """
-    import json
-
-    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n".encode()
+    payload = {"type": event_type, **data}
+    return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode()
 
 
 def _map_finish_reason(openai_reason: str | None) -> str:

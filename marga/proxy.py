@@ -45,6 +45,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from ._version import __version__
+from .anthropic import (
+    AnthropicRequest,
+    AnthropicResponse,
+    anthropic_to_openai,
+    openai_to_anthropic,
+    translate_openai_stream,
+)
 from .errors import (
     AllBackendsFailedError,
     BackendFailedError,
@@ -435,30 +442,21 @@ class Proxy:
         # Anthropic /v1/messages endpoint
         @app.post(
             "/v1/messages",
+            response_model=AnthropicResponse,
             tags=["anthropic"],
             summary="Anthropic Messages API",
             response_description="Anthropic-compatible message response",
         )
         async def anthropic_messages(
-            request: "AnthropicRequest",  # noqa: F821
-        ) -> "AnthropicResponse | StreamingResponse":  # noqa: F821
+            request: AnthropicRequest,
+        ) -> AnthropicResponse | StreamingResponse:
             """Anthropic /v1/messages endpoint with translation to OpenAI format."""
-            from .anthropic import (
-                AnthropicRequest,
-                anthropic_to_openai,
-                openai_to_anthropic,
-                translate_openai_stream,
-            )
-
             await self._ensure_secrets()
 
-            # Parse as Anthropic request
-            anthropic_req = AnthropicRequest.model_validate(request)
+            anthropic_req = request
 
             # Translate to OpenAI format
             openai_dict = anthropic_to_openai(anthropic_req)
-            from .models import ChatCompletionRequest
-
             openai_req = ChatCompletionRequest.model_validate(openai_dict)
 
             # Route through internal OpenAI handler
@@ -467,8 +465,6 @@ class Proxy:
             # Translate response back to Anthropic format
             if anthropic_req.stream:
                 # Streaming: wrap and translate SSE events
-                from .anthropic import translate_openai_stream
-
                 async def anthropic_stream() -> AsyncIterator[bytes]:
                     async for chunk in translate_openai_stream(
                         result.body_iterator, anthropic_req.model
@@ -484,8 +480,6 @@ class Proxy:
                 # Non-streaming: translate response dict
                 response_dict = result.model_dump() if hasattr(result, "model_dump") else result
                 anthropic_dict = openai_to_anthropic(response_dict, anthropic_req.model)
-                from .anthropic import AnthropicResponse
-
                 return AnthropicResponse.model_validate(anthropic_dict)
 
         # Add middleware
@@ -682,7 +676,7 @@ class Proxy:
     def serve(
         self,
         host: str = "127.0.0.1",
-        port: int = 8000,
+        port: int = 8010,
         *,
         log_level: str = "info",
         reload: bool = False,
