@@ -1,9 +1,9 @@
 # marga Repository Structure
 
 ```
-marga/
+marga/                         # repository root
 ├── .git/                      # Git repository
-├── .gitignore                 # Python/IDE ignores
+├── .gitignore                 # Python/IDE/local-config ignores
 │
 ├── LICENSE                    # Apache 2.0
 ├── NOTICE                     # Copyright notice
@@ -13,93 +13,49 @@ marga/
 ├── COMPARISON.md              # vs margAI (the full framework)
 ├── SUMMARY.md                 # Project summary
 ├── INDEX.md                   # Complete index
-├── TRANSFORMATION.md          # The story: 10,389 → 509 lines
+├── TRANSFORMATION.md          # The story: 10,389 -> 509 lines
+├── STRUCTURE.md               # This file
 │
-├── pyproject.toml             # Package config
+├── pyproject.toml             # Package config (hatchling, `marga` entry point)
 ├── uv.lock                    # Dependency lock
+├── marga.toml.example         # Config template (copy to marga.toml; untracked)
 │
-├── __init__.py          (14)  # Package exports
-├── proxy.py            (208)  # Main proxy + FastAPI
-├── router.py           (125)  # Smart routing
-├── hooks.py             (70)  # Hook system
-├── transport.py         (92)  # HTTP transport
-│                       ─────
-│                        509   CORE LINES
+├── Dockerfile                 # Container image (binds 127.0.0.1:8010)
+├── docker-compose.yml         # Compose service, env from env_file
+├── worker.py                  # Cloudflare Worker entry point
+├── wrangler.toml              # Cloudflare Worker config
 │
-├── example.py                 # Complete working example
-└── test_marga.py              # 7 passing tests
+├── marga/                     # THE PYTHON PACKAGE (import marga)
+│   ├── __init__.py            # Package exports
+│   ├── _version.py            # Version string
+│   ├── _util.py               # Shared helpers
+│   ├── cli.py                 # `marga` command line (serve, ...)
+│   ├── config.py              # marga.toml / JSON backend loading
+│   ├── vault.py               # worker-env vault client
+│   ├── models.py              # Pydantic request/response models
+│   ├── proxy.py               # Proxy + FastAPI app
+│   ├── anthropic.py           # Anthropic-compatible endpoint
+│   ├── middleware.py          # Auth + CORS
+│   ├── router.py              # Smart routing + usage tracking
+│   ├── strategies.py          # Routing strategies
+│   ├── availability.py        # Runtime detection + backend availability
+│   ├── store.py               # Usage store
+│   ├── hooks.py               # Before/after hook system
+│   ├── transport.py           # HTTP backend communication
+│   └── errors.py              # Error types
+│
+├── examples/
+│   └── basic.py               # Working example
+└── tests/
+    └── test_marga.py          # Test suite
 ```
 
-## File Sizes
+## Notes
 
-```
-Total repository: ~240KB (excluding .git, .venv)
-Core source code:  ~15KB (5 Python files)
-Documentation:     ~50KB (6 markdown files)
-```
-
-## Line Counts
-
-```
-Core source:        509 lines
-Tests:              128 lines
-Example:             92 lines
-Documentation:    2,000+ lines
-```
-
-## Quick Navigation
-
-**New here?**
-1. [README.md](README.md) - What is marga?
-2. [QUICKSTART.md](QUICKSTART.md) - Run it in 60 seconds
-3. [example.py](example.py) - See it in action
-
-**Comparing to margAI?**
-1. [TRANSFORMATION.md](TRANSFORMATION.md) - The full story
-2. [COMPARISON.md](COMPARISON.md) - Detailed comparison
-
-**Building something?**
-1. [INDEX.md](INDEX.md) - API reference
-2. [test_marga.py](test_marga.py) - Usage patterns
-3. Source files - Only 509 lines total!
-
-## Dependencies
-
-```toml
-dependencies = [
-    "fastapi>=0.100.0",
-    "httpx>=0.27.0",
-    "uvicorn>=0.20.0",
-]
-```
-
-That's it. No pydantic restrictions, no multipart, no extras.
-
-## Installation
-
-```bash
-# Clone
-git clone <your-repo-url> marga
-cd marga
-
-# Install
-uv pip install -e .
-
-# Test
-pytest test_marga.py -v
-
-# Run example
-python example.py
-```
-
-## Philosophy
-
-**Small is beautiful.**
-
-- 509 lines of core code
-- 3 dependencies
-- 2 features (routing + hooks)
-- 1 purpose (transparent LLM proxy)
-- 0 bloat
-
-**मार्ग (mārga)** - The path is clear.
+- The inner `marga/` directory is the importable package. `pyproject.toml`
+  (`packages = ["marga"]`), the Dockerfile (`COPY marga ./marga`) and the
+  `marga` console script all depend on it; it is not a duplicate of the root.
+- `marga.toml` is local configuration and is gitignored. Secrets are never
+  stored there: backends reference vault keys through `api_key_secret`.
+- Generated directories (`.venv/`, `__pycache__/`, `.pytest_cache/`,
+  `.ruff_cache/`) are gitignored.
