@@ -341,9 +341,9 @@ uv pip install fastapi httpx uvicorn
 
 ## What's Next?
 
-- See `example.py` for complete working example
+- See `examples/basic.py` for complete working example
 - See `COMPARISON.md` for marga vs margAI differences
-- See `test_marga.py` for more usage patterns
+- See `tests/test_marga.py` for more usage patterns
 - Read source: only 509 lines total!
 
 ## Support

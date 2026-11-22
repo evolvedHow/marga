@@ -78,13 +78,14 @@ proxy.serve()  # Start on port 8000
 
 ```
 marga/
-├── __init__.py       (14 lines)  - Package exports
-├── proxy.py          (208 lines) - Main proxy + FastAPI app
-├── router.py         (125 lines) - Smart routing + usage tracking
-├── hooks.py          (70 lines)  - Before/after hook system
-├── transport.py      (92 lines)  - HTTP backend communication
-├── example.py        - Complete working example
-├── test_marga.py     - 7 passing tests
+├── marga/            - Python package
+│   ├── __init__.py   - Package exports
+│   ├── proxy.py      - Main proxy + FastAPI app
+│   ├── router.py     - Smart routing + usage tracking
+│   ├── hooks.py      - Before/after hook system
+│   └── transport.py  - HTTP backend communication
+├── examples/basic.py - Working example
+├── tests/test_marga.py - 7 passing tests
 ├── pyproject.toml    - Dependencies
 ├── README.md         - Overview
 ├── QUICKSTART.md     - 60-second start guide
@@ -147,7 +148,7 @@ marga/
 
 All tests passing:
 ```bash
-$ pytest test_marga.py -v
+$ pytest tests/test_marga.py -v
 ✓ test_basic_routing
 ✓ test_custom_router
 ✓ test_before_hooks
@@ -161,7 +162,7 @@ $ pytest test_marga.py -v
 
 ## Next Steps
 
-1. **Try it**: `python example.py`
+1. **Try it**: `python examples/basic.py`
 2. **Test it**: `curl http://127.0.0.1:8000/health`
 3. **Integrate it**: Point your homelab services at `http://127.0.0.1:8000/v1`
 
@@ -170,7 +171,7 @@ $ pytest test_marga.py -v
 - **QUICKSTART.md** - Get running in 60 seconds
 - **COMPARISON.md** - Detailed comparison with margAI
 - **README.md** - Features and architecture
-- **example.py** - Complete working example with RAG + routing
+- **examples/basic.py** - Working example
 
 ## Philosophy
 
