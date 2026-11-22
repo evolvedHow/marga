@@ -9,9 +9,9 @@ services:
       # Config source (TOML file or JSON backends)
       - MARGA_CONFIG=${MARGA_CONFIG:-/app/marga.toml}
       
-      # Vault credentials (loaded from stack/.env)
-      - VAULT_URL=${VAULT_URL}
-      - VAULT_TOKEN=${VAULT_TOKEN}
+      # Vault credentials come from env_file below. Do not re-declare them here:
+      # `${VAULT_URL}` interpolates from the shell, not env_file, and would
+      # override the loaded value with an empty string.
       
       # Optional: Auth token for public endpoints
       # - MARGA_AUTH_TOKEN=${MARGA_AUTH_TOKEN}

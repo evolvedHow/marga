@@ -19,7 +19,7 @@ EXPOSE 8010
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://127.0.0.1:8010/health', timeout=2.0)" || exit 1
+    CMD /app/.venv/bin/python -c "import httpx; httpx.get('http://127.0.0.1:8010/health', timeout=2.0)" || exit 1
 
-# Run marga
-CMD ["uv", "run", "marga", "serve", "--host", "0.0.0.0", "--port", "8010"]
+# Run marga (bind to loopback per homelab networking rule)
+CMD ["uv", "run", "marga", "serve", "--host", "127.0.0.1", "--port", "8010"]
