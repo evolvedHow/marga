@@ -235,10 +235,27 @@ curl http://localhost:8010/
 
 ## Authentication and contexts
 
+### Generating a marga API key
+
+marga does not mint keys itself. A marga key is just a high-entropy bearer
+token you create once and store where your clients (and marga) can read it.
+The worker-env vault ships a generator:
+
+```bash
+uv run vault gentoken
+# -> {"bearer_token": "AbC...44chars...", "next_steps": [...]}
+```
+
+Copy the `bearer_token` value into `MARGA_AUTH_TOKEN` (single tenant) or into
+the vault CSV for a context (multi-tenant), and hand the same value to your
+client. Regenerate and rotate it the same way you would any other secret.
+
+### Single tenant
+
 Set `MARGA_AUTH_TOKEN` to require bearer authentication:
 
 ```bash
-export MARGA_AUTH_TOKEN=your-secret-token
+export MARGA_AUTH_TOKEN=$(uv run vault gentoken | python3 -c 'import sys,json;print(json.load(sys.stdin)["bearer_token"])')
 marga serve
 ```
 
