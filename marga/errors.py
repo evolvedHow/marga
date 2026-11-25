@@ -57,7 +57,7 @@ class BudgetExhaustedError(MargaError):
 
 
 class VaultError(MargaError):
-    """Base class for worker-env vault failures.
+    """Base class for vault failures.
 
     Attributes:
         status: HTTP status returned by the vault, 0 for client-side errors.
@@ -74,7 +74,7 @@ class VaultNotConfiguredError(VaultError):
     """Raised when a vault lookup is required but no credentials are present.
 
     Usually means ``VAULT_URL`` / ``VAULT_TOKEN`` were not exported. For local
-    development they live in ``worker-env/.dev.vars``; see the homestead
+    development they live in ``vault/.dev.vars``; see the homestead
     security rules for the deployed location.
     """
 
@@ -83,7 +83,7 @@ class VaultNotConfiguredError(VaultError):
         super().__init__(
             "Vault credentials missing: "
             + ", ".join(missing)
-            + ". Set them from the worker-env vault (local dev: worker-env/.dev.vars)."
+            + ". Set them from the vault (local dev: vault/.dev.vars)."
         )
 
 
@@ -99,7 +99,7 @@ class SecretNotFoundError(VaultError):
         self.context = context
         self.key = key
         super().__init__(
-            f"Secret {context}/{key} not found in the worker-env vault",
+            f"Secret {context}/{key} not found in the vault",
             status=404,
         )
 

@@ -4,7 +4,7 @@ A *context* is the unit of credential isolation. One marga process can front
 several upstream accounts - a personal OpenCode subscription and a non-profit
 one, say - and each caller is served by exactly the account their context names.
 
-Contexts deliberately mirror the ``worker-env`` vault's existing contexts rather
+Contexts deliberately mirror the ``vault`` vault's existing contexts rather
 than inventing a parallel roster: a context with no vault context of its own
 falls back to the vault's shared default, which is where the rule "if the
 context is empty it is available everywhere" already lives. marga therefore
@@ -106,7 +106,7 @@ class ContextSpec:
 
     Attributes:
         name: Context name used on the wire (``"nonprofit"``).
-        vault_context: ``worker-env`` context holding this context's API keys.
+        vault_context: ``vault`` context holding this context's API keys.
             Empty means "inherit the proxy's vault context".
         token_secret: Vault key holding this context's bearer token, resolved
             lazily so a missing token degrades one context instead of all.

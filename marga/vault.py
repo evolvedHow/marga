@@ -1,7 +1,7 @@
-"""Read API keys and other secrets from the deployed ``worker-env`` vault.
+"""Read API keys and other secrets from the deployed ``vault`` vault.
 
 The homestead runs one centralised secret vault as a Cloudflare Worker
-(``~/codebox/worker-env``, deployed as ``worker-env-vault``). Every app reads
+(``~/codebox/vault``, deployed as ``worker-env-vault``). Every app reads
 its credentials from there rather than keeping a ``.env`` file - the only
 thing an app stores locally is the two vault credentials themselves
 (``VAULT_URL`` / ``VAULT_TOKEN``).
@@ -11,7 +11,7 @@ not depend on the ``worker_env`` package (which is not on PyPI), so marga can
 be published and bundled for Cloudflare Python Workers without pulling a
 private dependency.
 
-Wire format (see worker-env ``README.md``)::
+Wire format (see vault ``README.md``)::
 
     GET {VAULT_URL}/secrets/{context}/{key}
     Authorization: Bearer {VAULT_TOKEN}
@@ -44,7 +44,7 @@ SECRETS_PATH = "/secrets"
 
 
 class VaultClient:
-    """Async client for the worker-env secret vault.
+    """Async client for the vault secret vault.
 
     Attributes:
         base_url: Deployed vault origin, e.g. ``https://worker-env-vault.example.workers.dev``.
@@ -271,7 +271,7 @@ class VaultClient:
 
             if response.status_code in {401, 403}:
                 raise VaultError(
-                    "Vault rejected VAULT_TOKEN; refresh it from the worker-env deployment",
+                    "Vault rejected VAULT_TOKEN; refresh it from the vault deployment",
                     status=response.status_code,
                     detail=_detail(response),
                 )

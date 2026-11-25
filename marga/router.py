@@ -37,7 +37,7 @@ class Backend:
         base_url: OpenAI-compatible base URL, e.g. ``https://api.openai.com/v1``.
         api_key: Bearer token. Empty for unauthenticated endpoints such as
             a local llama.cpp server. Prefer :attr:`api_key_secret` so the key
-            is read from the worker-env vault instead of being stored inline.
+            is read from the vault instead of being stored inline.
         api_key_secret: Vault key name (``"KEY_OPENAI"``) resolved lazily by
             :meth:`marga.proxy.Proxy.resolve_secrets`.
         api_key_env: Environment variable holding the key; the fallback for

@@ -88,7 +88,7 @@ echo "MARGA_TOKEN_PERSONAL,$(uv run vault gentoken),Personal marga key,1,$(date 
 echo "MARGA_TOKEN_NONPROFIT,$(uv run vault gentoken),Nonprofit marga key,1,$(date -Iseconds)" \
   >> worker/secrets/nonprofit.secrets.csv
 
-npm run deploy     # from ~/codebox/worker-env
+npm run deploy     # from ~/codebox/vault
 ```
 
 The token is hashed in marga's memory only; the plaintext never leaves the

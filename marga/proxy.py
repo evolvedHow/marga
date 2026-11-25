@@ -8,7 +8,7 @@ touch. Declare backends, decorate the behaviour you want, serve:
     proxy = Proxy(backends={
         "groq": {
             "base_url": "https://api.groq.com/openai/v1",
-            "api_key_secret": "KEY_GROQ",       # read from the worker-env vault
+            "api_key_secret": "KEY_GROQ",       # read from the vault
             "models": ["llama-3.3-70b-versatile"],
         },
         "openai": {
