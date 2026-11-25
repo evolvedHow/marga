@@ -126,6 +126,41 @@ class Transport:
             raise ValueError(f"Backend {base_url} returned non-object JSON")
         return payload
 
+    async def embed(
+        self,
+        base_url: str,
+        api_key: str = "",
+        body: dict[str, Any] | None = None,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Send an OpenAI-compatible embeddings request.
+
+        Args:
+            base_url: Backend base URL.
+            api_key: Bearer token for the backend.
+            body: ``{"model": ..., "input": ...}`` request body.
+            headers: Extra backend-specific headers.
+
+        Returns:
+            The parsed JSON response.
+
+        Raises:
+            httpx.HTTPStatusError: On a 4xx/5xx backend response.
+            httpx.HTTPError: On transport failures.
+            ValueError: When the response body is not a JSON object.
+        """
+        response = await self._client.post(
+            self._url(base_url, "/embeddings"),
+            json=body or {},
+            headers=self._headers(api_key, headers),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError(f"Backend {base_url} returned non-object JSON")
+        return payload
+
     async def stream(
         self,
         base_url: str,

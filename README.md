@@ -192,9 +192,30 @@ curl -X POST http://localhost:8010/v1/messages \
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello"}]
   }'
+
+# Token counting (called by Claude Code on startup)
+curl -X POST http://localhost:8010/v1/messages/count_tokens \
+  -H "x-api-key: your-marga-auth-token" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-sonnet-5-5", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
-Streaming works for both endpoints (set `"stream": true`).
+Tools, tool results and `system` content blocks are translated in both
+directions, including streaming tool-call deltas, so tool-using Anthropic
+clients work unchanged.
+
+### Embeddings
+
+```bash
+curl -X POST http://localhost:8010/v1/embeddings \
+  -H "Authorization: Bearer your-marga-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "text-embedding-3-small", "input": ["one", "two"]}'
+```
+
+Only backends declaring `capabilities = ["embeddings"]` are eligible.
+
+Streaming works for both chat endpoints (set `"stream": true`).
 
 ### Metadata
 
@@ -202,14 +223,17 @@ Streaming works for both endpoints (set `"stream": true`).
 # Health check
 curl http://localhost:8010/health
 
-# Usage statistics
+# Usage statistics for the caller's context
 curl http://localhost:8010/stats?period=month
+
+# Every context at once, as "context/backend"
+curl http://localhost:8010/stats?period=month&context=all
 
 # Proxy info
 curl http://localhost:8010/
 ```
 
-## Authentication
+## Authentication and contexts
 
 Set `MARGA_AUTH_TOKEN` to require bearer authentication:
 
@@ -223,6 +247,42 @@ Clients send token as:
 - `x-api-key: <token>` (Anthropic style)
 
 Public endpoints (`/health`, `/docs`) always allowed.
+
+That single token is the simple case. When several callers must be billed to
+*separate upstream accounts* - a non-profit's subscription next to your own,
+say - use **contexts** instead. Each API key is bound to a context, and each
+context resolves its own keys from its own `worker-env` vault context:
+
+```toml
+[contexts.personal]
+vault_context = "marga"                    # your own accounts
+token_secret  = "MARGA_TOKEN_PERSONAL"
+default       = true                      # serves callers with no key
+allow         = ["nonprofit"]             # may also select the org context
+
+[contexts.nonprofit]
+vault_context = "nonprofit"                # the org's accounts
+token_secret  = "MARGA_TOKEN_NONPROFIT"
+
+[backends.opencode]
+base_url       = "https://opencode.ai/v1"
+api_key_secret = "KEY_OPENCODE"            # one block, N accounts
+```
+
+Because the backend is not pinned to a context, `KEY_OPENCODE` is read as
+`marga/KEY_OPENCODE` for your key and `nonprofit/KEY_OPENCODE` for the org's.
+Failover, usage accounting and `/v1/models` are all per context, so one
+account's traffic can never spill onto the other's card.
+
+Three ways to pick a context, in precedence order:
+
+| Selector | Use it when |
+|---|---|
+| the API key itself | always - every client already sends it |
+| `X-Marga-Context: <name>` | the client supports custom headers; the key must be allowed to select that context |
+| `/c/<name>/v1/...` base URL | the client only lets you change the base URL |
+
+Full details and client recipes: [`docs/contexts.md`](docs/contexts.md).
 
 ## CORS
 

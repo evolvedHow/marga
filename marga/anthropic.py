@@ -1,18 +1,38 @@
-"""Anthropic /v1/messages endpoint with translation to/from OpenAI format.
+"""Anthropic Messages API surface, translated to and from OpenAI format.
 
-Accepts Anthropic-shaped requests and translates them to OpenAI format for
-the internal routing layer, then translates responses back to Anthropic format.
-Supports streaming with SSE event translation.
+marga speaks OpenAI chat-completions to its backends and translates at the
+edge, so an Anthropic client (Claude Code, the ``anthropic`` SDK, any tool that
+only offers an "Anthropic" provider entry) can point at marga unchanged.
+
+Translation covers the parts that actually change behaviour:
+
+* ``system`` as a string *or* a list of content blocks.
+* ``tools``/``tool_choice``, in both directions, including streaming tool-call
+  deltas. Dropping these silently would make a tool-using client appear to
+  forget every tool it declared.
+* ``stop_sequences`` → ``stop``.
+* ``stop_reason`` ← ``finish_reason``, with ``tool_use`` when the model called
+  a tool.
+
+Fields with no OpenAI equivalent (``top_k``, ``thinking``, ``metadata``) are
+dropped with a warning instead of being forwarded, because OpenAI-compatible
+backends reject unknown body fields with a 400.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .transport import feed_sse
+
+logger = logging.getLogger("marga.anthropic")
+
+#: Anthropic request fields with no OpenAI equivalent.
+UNSUPPORTED_FIELDS = ("top_k", "thinking", "metadata", "service_tier", "mcp_servers")
 
 
 class AnthropicMessage(BaseModel):
@@ -20,32 +40,65 @@ class AnthropicMessage(BaseModel):
 
     Attributes:
         role: Message role (user or assistant).
-        content: Message text or content blocks.
+        content: Message text or content blocks (``text``, ``tool_use``,
+            ``tool_result``, ``image``).
     """
+
+    model_config = ConfigDict(extra="allow")
 
     role: Literal["user", "assistant"]
     content: str | list[dict[str, Any]]
 
 
 class AnthropicRequest(BaseModel):
-    """Anthropic /v1/messages request.
+    """Anthropic ``/v1/messages`` request.
 
     Attributes:
         model: Model ID.
         messages: Conversation history (no system role in messages).
         max_tokens: Maximum tokens to generate (required by Anthropic).
-        system: Optional system prompt (separate from messages).
+        system: System prompt, as text or as content blocks.
         temperature: Sampling temperature.
+        top_p: Nucleus sampling threshold.
         stream: Enable streaming response.
+        stop_sequences: Strings that stop generation.
+        tools: Tool declarations in Anthropic shape (``input_schema``).
+        tool_choice: How the model should choose a tool.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     model: str
     messages: list[AnthropicMessage]
     max_tokens: int = Field(..., ge=1)
-    system: str | None = None
+    system: str | list[dict[str, Any]] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stream: bool = False
     stop_sequences: list[str] | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: dict[str, Any] | None = None
+
+
+class AnthropicCountTokensRequest(BaseModel):
+    """Anthropic ``/v1/messages/count_tokens`` request.
+
+    ``max_tokens`` is absent here because Anthropic does not require it when
+    only counting prompt tokens.
+
+    Attributes:
+        model: Model ID the prompt would be sent to.
+        messages: Conversation history.
+        system: System prompt, as text or as content blocks.
+        tools: Tool declarations, which count towards the prompt.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str
+    messages: list[AnthropicMessage]
+    system: str | list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
 
 
 class AnthropicUsage(BaseModel):
@@ -61,19 +114,27 @@ class AnthropicUsage(BaseModel):
 
 
 class AnthropicContent(BaseModel):
-    """Content block in Anthropic response.
+    """Content block in an Anthropic response.
 
     Attributes:
-        type: Content type (always "text" for now).
-        text: Generated text.
+        type: Block type (``text`` or ``tool_use``).
+        text: Generated text, for ``text`` blocks.
+        id: Tool call id, for ``tool_use`` blocks.
+        name: Tool name, for ``tool_use`` blocks.
+        input: Tool arguments, for ``tool_use`` blocks.
     """
 
-    type: Literal["text"] = "text"
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["text", "tool_use"] = "text"
     text: str = ""
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] | None = None
 
 
 class AnthropicResponse(BaseModel):
-    """Anthropic /v1/messages response.
+    """Anthropic ``/v1/messages`` response.
 
     Attributes:
         id: Completion ID.
@@ -91,29 +152,196 @@ class AnthropicResponse(BaseModel):
     content: list[AnthropicContent]
     model: str
     stop_reason: str | None = None
+    stop_sequence: str | None = None
     usage: AnthropicUsage
 
 
-def anthropic_to_openai(request: AnthropicRequest) -> dict[str, Any]:
-    """Translate Anthropic request to OpenAI format.
+def system_text(system: str | list[dict[str, Any]] | None) -> str:
+    """Flatten an Anthropic system prompt to text.
 
     Args:
-        request: Anthropic /v1/messages request.
+        system: Text, list of content blocks, or ``None``.
 
     Returns:
-        OpenAI-compatible /v1/chat/completions request dict.
+        Concatenated text; empty when there is no system prompt.
     """
-    messages = []
+    if system is None:
+        return ""
+    if isinstance(system, str):
+        return system
+    parts: list[str] = []
+    for block in system:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
 
-    # System prompt becomes first message
-    if request.system:
-        messages.append({"role": "system", "content": request.system})
 
-    # Convert Anthropic messages
-    for msg in request.messages:
-        messages.append({"role": msg.role, "content": msg.content})
+def anthropic_tools_to_openai(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Convert Anthropic tool declarations to OpenAI function tools.
 
-    openai_request = {
+    Args:
+        tools: Anthropic tools (``{"name", "description", "input_schema"}``).
+
+    Returns:
+        OpenAI tools, or an empty list.
+    """
+    converted: list[dict[str, Any]] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if not name:
+            continue
+        function: dict[str, Any] = {
+            "name": name,
+            "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
+        }
+        description = tool.get("description")
+        if description:
+            function["description"] = description
+        converted.append({"type": "function", "function": function})
+    return converted
+
+
+def anthropic_tool_choice_to_openai(choice: dict[str, Any] | None) -> Any:
+    """Convert an Anthropic ``tool_choice`` to its OpenAI equivalent.
+
+    Args:
+        choice: ``{"type": "auto"|"any"|"tool"|"none", "name": ...}`` or ``None``.
+
+    Returns:
+        ``"auto"``, ``"required"``, ``"none"``, an OpenAI function selector, or
+        ``None`` when nothing was requested.
+    """
+    if not choice:
+        return None
+    kind = choice.get("type")
+    if kind == "auto":
+        return "auto"
+    if kind == "any":
+        return "required"
+    if kind == "none":
+        return "none"
+    if kind == "tool" and choice.get("name"):
+        return {"type": "function", "function": {"name": choice["name"]}}
+    return None
+
+
+def translate_messages(
+    messages: list[AnthropicMessage],
+) -> list[dict[str, Any]]:
+    """Translate Anthropic messages into OpenAI chat messages.
+
+    Assistant ``tool_use`` blocks are re-expressed as ``tool_calls`` and user
+    ``tool_result`` blocks as ``tool`` messages, which is what an
+    OpenAI-compatible backend expects for a tool round-trip.
+
+    Args:
+        messages: Anthropic messages.
+
+    Returns:
+        OpenAI chat messages.
+    """
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.content
+        if isinstance(content, str):
+            converted.append({"role": message.role, "content": content})
+            continue
+
+        if message.role == "assistant":
+            texts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
+                    texts.append(str(block.get("text", "")))
+                elif block.get("type") == "tool_use":
+                    tool_calls.append(
+                        {
+                            "id": block.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name", ""),
+                                "arguments": json.dumps(block.get("input") or {}),
+                            },
+                        }
+                    )
+            payload: dict[str, Any] = {"role": "assistant", "content": "\n".join(texts) or None}
+            if tool_calls:
+                payload["tool_calls"] = tool_calls
+            converted.append(payload)
+            continue
+
+        # user role: tool_result blocks become standalone tool messages.
+        text_parts: list[dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_result":
+                result = block.get("content")
+                if isinstance(result, list):
+                    result = "\n".join(
+                        str(part.get("text", ""))
+                        for part in result
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    )
+                converted.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": block.get("tool_use_id", ""),
+                        "content": result if isinstance(result, str) else json.dumps(result),
+                    }
+                )
+            elif block.get("type") == "text":
+                text_parts.append({"type": "text", "text": block.get("text", "")})
+            elif block.get("type") == "image":
+                source = block.get("source") or {}
+                if source.get("type") == "base64":
+                    media_type = source.get("media_type", "image/png")
+                    encoded = source.get("data", "")
+                    text_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+                        }
+                    )
+        if text_parts:
+            if all(part["type"] == "text" for part in text_parts):
+                converted.append(
+                    {
+                        "role": "user",
+                        "content": "\n".join(part["text"] for part in text_parts),
+                    }
+                )
+            else:
+                converted.append({"role": "user", "content": text_parts})
+    return converted
+
+
+def anthropic_to_openai(request: AnthropicRequest) -> dict[str, Any]:
+    """Translate an Anthropic request to OpenAI chat-completions format.
+
+    Args:
+        request: Anthropic ``/v1/messages`` request.
+
+    Returns:
+        OpenAI-compatible request dict, ready for routing.
+
+    Raises:
+        ValueError: Never raised today; kept in the signature for symmetry with
+            :func:`openai_to_anthropic`.
+    """
+    messages: list[dict[str, Any]] = []
+    system = system_text(request.system)
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.extend(translate_messages(request.messages))
+
+    openai_request: dict[str, Any] = {
         "model": request.model,
         "messages": messages,
         "max_tokens": request.max_tokens,
@@ -122,42 +350,108 @@ def anthropic_to_openai(request: AnthropicRequest) -> dict[str, Any]:
 
     if request.temperature is not None:
         openai_request["temperature"] = request.temperature
-
+    if request.top_p is not None:
+        openai_request["top_p"] = request.top_p
     if request.stop_sequences:
         openai_request["stop"] = request.stop_sequences
+
+    tools = anthropic_tools_to_openai(request.tools)
+    if tools:
+        openai_request["tools"] = tools
+        choice = anthropic_tool_choice_to_openai(request.tool_choice)
+        if choice is not None:
+            openai_request["tool_choice"] = choice
+
+    dropped = unsupported_fields(request)
+    if dropped:
+        logger.warning(
+            "Dropping Anthropic fields with no OpenAI equivalent: %s", ", ".join(dropped)
+        )
 
     return openai_request
 
 
-def openai_to_anthropic(openai_response: dict[str, Any], model: str) -> dict[str, Any]:
-    """Translate OpenAI response to Anthropic format.
+def unsupported_fields(request: AnthropicRequest | AnthropicCountTokensRequest) -> list[str]:
+    """List request fields that will not reach the backend.
 
     Args:
-        openai_response: OpenAI /v1/chat/completions response.
-        model: Model ID to include in response.
+        request: Parsed Anthropic request.
 
     Returns:
-        Anthropic /v1/messages response dict.
+        Names of fields present on the request but not translatable.
     """
-    choice = openai_response.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content_text = message.get("content", "")
+    extra = getattr(request, "model_extra", None) or {}
+    return [name for name in UNSUPPORTED_FIELDS if name in extra]
 
-    usage = openai_response.get("usage", {})
-    anthropic_usage = {
-        "input_tokens": usage.get("prompt_tokens", 0),
-        "output_tokens": usage.get("completion_tokens", 0),
-    }
+
+def openai_to_anthropic(openai_response: dict[str, Any], model: str) -> dict[str, Any]:
+    """Translate an OpenAI response to Anthropic format.
+
+    Args:
+        openai_response: OpenAI ``/v1/chat/completions`` response.
+        model: Model ID to report in the response.
+
+    Returns:
+        Anthropic ``/v1/messages`` response dict.
+    """
+    choice = (openai_response.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+
+    blocks: list[dict[str, Any]] = []
+    text = message.get("content")
+    if isinstance(text, str) and text:
+        blocks.append({"type": "text", "text": text})
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": call.get("id", ""),
+                "name": function.get("name", ""),
+                "input": _parse_arguments(function.get("arguments")),
+            }
+        )
+    if not blocks:
+        blocks.append({"type": "text", "text": ""})
+
+    usage = openai_response.get("usage") or {}
+    stop_reason = _map_finish_reason(choice.get("finish_reason"))
+    if any(block["type"] == "tool_use" for block in blocks):
+        stop_reason = "tool_use"
 
     return {
         "id": openai_response.get("id", "msg-unknown"),
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": content_text}],
+        "content": blocks,
         "model": model,
-        "stop_reason": _map_finish_reason(choice.get("finish_reason")),
-        "usage": anthropic_usage,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        },
     }
+
+
+def _parse_arguments(raw: Any) -> dict[str, Any]:
+    """Decode a tool-call argument string.
+
+    Args:
+        raw: JSON string supplied by the backend, or an already-decoded dict.
+
+    Returns:
+        The decoded object; empty when the string is missing or invalid.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except ValueError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
 
 
 async def translate_openai_stream(
@@ -165,11 +459,10 @@ async def translate_openai_stream(
 ) -> AsyncIterator[bytes]:
     """Translate an OpenAI SSE stream to the Anthropic Messages SSE format.
 
-    Network chunks are re-framed into SSE lines first, so events split across
-    or batched within chunks are handled. The emitted sequence follows the
-    Anthropic spec: ``message_start``, ``content_block_start``, one
-    ``content_block_delta`` per text delta, ``content_block_stop``,
-    ``message_delta`` (stop reason and usage) and ``message_stop``.
+    Emits the sequence Anthropic clients expect - ``message_start``,
+    ``content_block_start``, ``content_block_delta`` per fragment,
+    ``content_block_stop`` per block, ``message_delta`` and ``message_stop`` -
+    including tool-use blocks assembled from streaming ``tool_calls`` deltas.
 
     Args:
         openai_stream: OpenAI SSE byte stream.
@@ -181,9 +474,12 @@ async def translate_openai_stream(
     message_id = f"msg-{id(openai_stream)}"
     input_tokens = 0
     output_tokens = 0
-    content_started = False
     stop_reason = "end_turn"
     buffer = b""
+    next_index = 0
+    text_index: int | None = None
+    open_blocks: list[int] = []
+    tool_indexes: dict[int, int] = {}
 
     yield _anthropic_event(
         "message_start",
@@ -212,23 +508,67 @@ async def translate_openai_stream(
             if not choices:
                 continue
             choice = choices[0]
-            text = (choice.get("delta") or {}).get("content")
+            delta = choice.get("delta") or {}
+
+            text = delta.get("content")
             if text:
-                if not content_started:
-                    content_started = True
+                if text_index is None:
+                    text_index = next_index
+                    next_index += 1
+                    open_blocks.append(text_index)
                     yield _anthropic_event(
                         "content_block_start",
-                        {"index": 0, "content_block": {"type": "text", "text": ""}},
+                        {"index": text_index, "content_block": {"type": "text", "text": ""}},
                     )
                 yield _anthropic_event(
                     "content_block_delta",
-                    {"index": 0, "delta": {"type": "text_delta", "text": text}},
+                    {
+                        "index": text_index,
+                        "delta": {"type": "text_delta", "text": text},
+                    },
                 )
+
+            for call in delta.get("tool_calls") or []:
+                position = int(call.get("index", 0))
+                function = call.get("function") or {}
+                if position not in tool_indexes:
+                    tool_indexes[position] = next_index
+                    next_index += 1
+                    open_blocks.append(tool_indexes[position])
+                    yield _anthropic_event(
+                        "content_block_start",
+                        {
+                            "index": tool_indexes[position],
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": call.get("id", f"toolu_{position}"),
+                                "name": function.get("name", ""),
+                                "input": {},
+                            },
+                        },
+                    )
+                arguments = function.get("arguments")
+                if arguments:
+                    yield _anthropic_event(
+                        "content_block_delta",
+                        {
+                            "index": tool_indexes[position],
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": arguments,
+                            },
+                        },
+                    )
+
             if choice.get("finish_reason"):
                 stop_reason = _map_finish_reason(choice["finish_reason"])
 
-    if content_started:
-        yield _anthropic_event("content_block_stop", {"index": 0})
+    if tool_indexes:
+        stop_reason = "tool_use"
+
+    for index in sorted(open_blocks):
+        yield _anthropic_event("content_block_stop", {"index": index})
+
     yield _anthropic_event(
         "message_delta",
         {
@@ -254,7 +594,7 @@ def _anthropic_event(event_type: str, data: dict[str, Any]) -> bytes:
 
 
 def _map_finish_reason(openai_reason: str | None) -> str:
-    """Map OpenAI finish_reason to Anthropic stop_reason.
+    """Map an OpenAI ``finish_reason`` to an Anthropic ``stop_reason``.
 
     Args:
         openai_reason: OpenAI finish_reason value.
@@ -265,7 +605,8 @@ def _map_finish_reason(openai_reason: str | None) -> str:
     mapping = {
         "stop": "end_turn",
         "length": "max_tokens",
-        "content_filter": "stop_sequence",
+        "content_filter": "refusal",
         "tool_calls": "tool_use",
+        "function_call": "tool_use",
     }
     return mapping.get(openai_reason or "", "end_turn")

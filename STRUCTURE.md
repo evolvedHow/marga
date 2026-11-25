@@ -15,6 +15,8 @@ marga/                         # repository root
 ├── INDEX.md                   # Complete index
 ├── TRANSFORMATION.md          # The story: 10,389 -> 509 lines
 ├── STRUCTURE.md               # This file
+├── docs/
+│   └── contexts.md            # Request contexts: design + client recipes
 │
 ├── pyproject.toml             # Package config (hatchling, `marga` entry point)
 ├── uv.lock                    # Dependency lock
@@ -31,23 +33,26 @@ marga/                         # repository root
 │   ├── _util.py               # Shared helpers
 │   ├── cli.py                 # `marga` command line (serve, ...)
 │   ├── config.py              # marga.toml / JSON backend loading
+│   ├── contexts.py            # Request contexts + token resolution
 │   ├── vault.py               # worker-env vault client
 │   ├── models.py              # Pydantic request/response models
 │   ├── proxy.py               # Proxy + FastAPI app
-│   ├── anthropic.py           # Anthropic-compatible endpoint
-│   ├── middleware.py          # Auth + CORS
+│   ├── anthropic.py           # Anthropic Messages API adapter
+│   ├── middleware.py          # Context auth + legacy bearer auth + CORS
 │   ├── router.py              # Smart routing + usage tracking
 │   ├── strategies.py          # Routing strategies
 │   ├── availability.py        # Runtime detection + backend availability
-│   ├── store.py               # Usage store
+│   ├── store.py               # Usage store (+ per-context scoping)
 │   ├── hooks.py               # Before/after hook system
 │   ├── transport.py           # HTTP backend communication
-│   └── errors.py              # Error types
+│   └── errors.py              # Error types + API error envelopes
 │
 ├── examples/
 │   └── basic.py               # Working example
 └── tests/
-    └── test_marga.py          # Test suite
+    ├── test_marga.py          # Core routing, hooks, accounting
+    ├── test_contexts.py       # Context isolation, selectors, tokens
+    └── test_compat.py         # OpenAI / Anthropic / embeddings surfaces
 ```
 
 ## Notes

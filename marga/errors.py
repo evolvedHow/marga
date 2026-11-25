@@ -4,9 +4,16 @@ Every error raised by the framework derives from :class:`MargaError` so that
 applications can catch a single base class. The proxy endpoint maps these
 exceptions onto HTTP status codes:
 
-    UnknownBackendError    -> 400 Bad Request
-    BudgetExhaustedError   -> 429 Too Many Requests
-    AllBackendsFailedError -> 502 Bad Gateway
+    UnknownBackendError     -> 400 Bad Request
+    BudgetExhaustedError    -> 429 Too Many Requests
+    AllBackendsFailedError  -> 502 Bad Gateway
+    UnknownContextError     -> 400 Bad Request
+    ContextForbiddenError   -> 403 Forbidden
+    NoBackendsForContextError -> 503 Service Unavailable
+
+The module also renders errors in the envelope of the ingress API that received
+the request, because an Anthropic SDK cannot parse an OpenAI error body (and
+vice versa).
 """
 
 from __future__ import annotations
@@ -97,6 +104,76 @@ class SecretNotFoundError(VaultError):
         )
 
 
+class ContextError(MargaError):
+    """Base class for request-context selection failures."""
+
+
+class UnknownContextError(ContextError):
+    """Raised when a caller asks for a context that is not configured.
+
+    Attributes:
+        context: The context name that was requested.
+        available: Context names that are configured.
+    """
+
+    def __init__(self, context: str, available: list[str]) -> None:
+        self.context = context
+        self.available = available
+        super().__init__(
+            f"Unknown context {context!r}; configured: {', '.join(available) or '(none)'}"
+        )
+
+
+class ContextForbiddenError(ContextError):
+    """Raised when a token is not permitted to select the requested context.
+
+    Attributes:
+        requested: The context the caller asked for.
+        token_context: The context the presented token is bound to.
+    """
+
+    def __init__(self, requested: str, token_context: str) -> None:
+        self.requested = requested
+        self.token_context = token_context
+        super().__init__(
+            f"Token bound to context {token_context!r} may not select context {requested!r}"
+        )
+
+
+class AuthenticationError(ContextError):
+    """Raised when no token was presented and authentication is required.
+
+    Attributes:
+        detail: Short explanation of what was missing.
+    """
+
+    def __init__(self, detail: str = "Missing API key") -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
+class NoBackendsForContextError(ContextError):
+    """Raised when a context has no usable backend left.
+
+    This happens when every backend visible to a context failed to resolve its
+    credentials. It is scoped to that context: other contexts keep serving.
+
+    Attributes:
+        context: The affected context.
+        failures: ``(backend, reason)`` pairs collected while materialising.
+    """
+
+    def __init__(self, context: str, failures: list[tuple[str, str]] | None = None) -> None:
+        self.context = context
+        self.failures = failures or []
+        message = f"No usable backend for context {context!r}"
+        if self.failures:
+            message = f"{message}: " + "; ".join(
+                f"{name} ({reason})" for name, reason in self.failures
+            )
+        super().__init__(message)
+
+
 class BackendFailedError(MargaError):
     """Raised when a single backend request fails.
 
@@ -131,14 +208,23 @@ def http_status_for(error: Exception) -> int:
         error: Exception raised while serving a request.
 
     Returns:
-        HTTP status code (400, 429, 502) or 500 for unclassified errors.
+        HTTP status code (400, 401, 403, 429, 502, 503) or 500 for
+        unclassified errors.
     """
     if isinstance(error, UnknownBackendError):
         return 400
+    if isinstance(error, AuthenticationError):
+        return 401
+    if isinstance(error, UnknownContextError):
+        return 400
+    if isinstance(error, ContextForbiddenError):
+        return 403
     if isinstance(error, BudgetExhaustedError):
         return 429
     if isinstance(error, AllBackendsFailedError):
         return 502
+    if isinstance(error, NoBackendsForContextError):
+        return 503
     return 500
 
 
@@ -159,3 +245,104 @@ def error_detail(error: Exception) -> Any:
             {"backend": attempt.backend, "error": str(attempt.cause)} for attempt in error.attempts
         ]
     return payload
+
+
+ANTHROPIC_PATH_PREFIX = "/v1/messages"
+
+#: HTTP status -> Anthropic ``error.type`` value.
+_ANTHROPIC_ERROR_TYPES = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    403: "permission_error",
+    404: "not_found_error",
+    413: "request_too_large",
+    422: "invalid_request_error",
+    429: "rate_limit_error",
+    500: "api_error",
+    503: "overloaded_error",
+    529: "overloaded_error",
+}
+
+
+def is_anthropic_path(path: str) -> bool:
+    """Report whether a request path belongs to the Anthropic ingress.
+
+    Args:
+        path: Request path, e.g. ``"/v1/messages"`` or ``"/v1/chat/completions"``.
+
+    Returns:
+        ``True`` when the caller speaks the Anthropic Messages API.
+    """
+    return path.startswith(ANTHROPIC_PATH_PREFIX)
+
+
+def anthropic_error_payload(status: int, message: str, *, kind: str) -> dict[str, Any]:
+    """Build an Anthropic-shaped error body.
+
+    Anthropic SDKs parse ``{"type": "error", "error": {"type", "message"}}`` and
+    raise a parse error on any other shape, which hides the real cause.
+
+    Args:
+        status: HTTP status code being returned.
+        message: Human-readable description.
+        kind: Error class name, appended to the Anthropic error type.
+
+    Returns:
+        JSON-serialisable response body.
+    """
+    return {
+        "type": "error",
+        "error": {
+            "type": _ANTHROPIC_ERROR_TYPES.get(status, "api_error"),
+            "message": message if not kind else f"{message} [{kind}]",
+        },
+    }
+
+
+def openai_error_payload(status: int, message: str, *, kind: str) -> dict[str, Any]:
+    """Build an OpenAI-shaped error body.
+
+    ``detail`` is retained alongside ``error`` because it is what marga has
+    always returned and what its own tests assert on; the ``error`` object is
+    what OpenAI SDKs actually read.
+
+    Args:
+        status: HTTP status code being returned.
+        message: Human-readable description.
+        kind: Error class name, forwarded as ``error.type``.
+
+    Returns:
+        JSON-serialisable response body.
+    """
+    return {
+        "error": {
+            "message": message,
+            "type": kind,
+            "code": status,
+        },
+        "detail": message,
+        "type": kind,
+    }
+
+
+def error_payload_for_path(
+    path: str,
+    status: int,
+    message: str,
+    *,
+    kind: str,
+) -> dict[str, Any]:
+    """Render an error body in the envelope the client expects.
+
+    Args:
+        path: Request path used to pick the envelope.
+        status: HTTP status code being returned.
+        message: Human-readable description.
+        kind: Error class name.
+
+    Returns:
+        Anthropic-shaped body for ``/v1/messages*``, OpenAI-shaped otherwise.
+    """
+    if is_anthropic_path(path):
+        return anthropic_error_payload(status, message, kind=kind)
+    return openai_error_payload(status, message, kind=kind)

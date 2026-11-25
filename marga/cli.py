@@ -101,10 +101,18 @@ def serve(
     print(f"Starting marga v{proxy.__class__.__module__.split('.')[0]}")
     print(f"  Listening on http://{host}:{port}")
     print(f"  Backends: {', '.join(proxy.router.backends.keys())}")
+    if proxy.contexts.names:
+        print(
+            f"  Contexts: {', '.join(proxy.contexts.names)} "
+            f"(default: {proxy.default_context}, auth: "
+            f"{'required' if proxy.contexts.required else 'off'})"
+        )
     print(f"  Docs: http://{host}:{port}/docs")
     print("\nEndpoints:")
     print(f"  POST http://{host}:{port}/v1/chat/completions  (OpenAI)")
     print(f"  POST http://{host}:{port}/v1/messages          (Anthropic)")
+    print(f"  POST http://{host}:{port}/v1/messages/count_tokens")
+    print(f"  POST http://{host}:{port}/v1/embeddings")
     print(f"  GET  http://{host}:{port}/v1/models")
     print(f"  GET  http://{host}:{port}/health")
     print(f"  GET  http://{host}:{port}/stats")

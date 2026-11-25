@@ -18,12 +18,51 @@ name = "marga"
 # Keys are read as KEY_<PROVIDER> from worker-env vault context
 vault_context = "marga"
 
+# ---------------------------------------------------------------------------
+# Request contexts
+# ---------------------------------------------------------------------------
+# A context is the credential scope a caller is billed to. One API key maps to
+# one context; each context resolves its own upstream keys from its own vault
+# context, keeps its own usage counters, and only fails over within itself.
+#
+# A context value can be a bare vault context name, or a table with:
+#   vault_context  worker-env context holding this context's keys
+#   tokens         bearer tokens bound to this context (inline; dev only)
+#   token_secret   vault key holding this context's bearer token
+#   token_env      environment variable holding the bearer token
+#   allow          other contexts this context's tokens may select explicitly
+#   default        serve callers that present no key (one context only)
+#
+# Nothing here is required: with no [contexts] table, marga behaves as before
+# (single tenant, MARGA_AUTH_TOKEN if you set one).
+#
+# [contexts.personal]
+# vault_context = "marga"          # your own accounts live here
+# token_secret = "MARGA_TOKEN_PERSONAL"
+# default = true
+# allow = ["nonprofit"]            # may also select the org context
+
+# [contexts.nonprofit]
+# vault_context = "nonprofit"      # the org's accounts live here
+# token_secret = "MARGA_TOKEN_NONPROFIT"
+
+# Which context serves a request that presents no key. Optional; defaults to
+# the context flagged `default`, else the first one alphabetically.
+# default_context = "personal"
+
 # Backend configurations
 # Each backend needs:
 #   - base_url: OpenAI-compatible endpoint
 #   - api_key_secret: Vault key name (e.g., "KEY_ANTHROPIC")
 #   - models: List of model IDs (empty = pass-through any model)
 #   - cost_per_1k_tokens: Optional USD rate for cost accounting
+# Optional:
+#   - context: "inherit" (default) resolves this backend's key in the caller's
+#     vault context, so ONE block serves every account; "shared" always reads
+#     vault_context; any other value pins the backend to that context
+#   - vault_context: fixed vault context for this backend's key
+#   - capabilities: ["chat"] (default) or ["embeddings"]
+#   - advertise: model ids to publish in /v1/models for pass-through backends
 
 [backends.llama]
 # Local llama.cpp server (no API key needed)
@@ -60,7 +99,24 @@ cost_per_1k_tokens = 0.0  # Free tier
 base_url = "https://openrouter.ai/api/v1"
 api_key_secret = "KEY_OPENROUTER"
 models = []  # Empty = accept any model ID
+advertise = []  # Optional: model ids to publish in /v1/models
 cost_per_1k_tokens = 0.0  # Varies by model
+
+# A backend pinned to one context: only callers in that context can reach it.
+# Use this when the org's provider endpoint or model list differs from yours.
+# [backends.nonprofit_anthropic]
+# base_url = "https://api.anthropic.com/v1"
+# api_key_secret = "KEY_ANTHROPIC"
+# context = "nonprofit"
+# models = ["claude-sonnet-5-5"]
+
+# Embeddings backend, selected by POST /v1/embeddings only.
+# [backends.embeddings]
+# base_url = "https://api.openai.com/v1"
+# api_key_secret = "KEY_OPENAI"
+# models = ["text-embedding-3-small"]
+# capabilities = ["embeddings"]
+# cost_per_1k_tokens = 0.02
 
 # Alternative: inline API key (NOT RECOMMENDED - use api_key_secret instead)
 # [backends.example]

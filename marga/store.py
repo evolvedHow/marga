@@ -120,6 +120,85 @@ class UsageStore(Protocol):
         ...
 
 
+class ScopedStore:
+    """Prefix every accounting key with a scope, usually a context name.
+
+    Without this, all contexts share one counter per backend: the non-profit's
+    spend would land in your personal totals, and :class:`~marga.strategies.
+    LeastUsed` would load-balance *across* accounts. Wrapping the store keeps
+    the prefixing completely out of the strategies, which continue to see plain
+    ``"openai:2026-10"`` keys.
+
+    Example:
+        scoped = ScopedStore(InMemoryStore(), "nonprofit")
+        await scoped.record("opencode", tokens=1000)
+        # inner store now holds "nonprofit::opencode"
+    """
+
+    def __init__(self, store: UsageStore, scope: str) -> None:
+        """Wrap a store.
+
+        Args:
+            store: Underlying store holding the real counters.
+            scope: Prefix applied to every key, e.g. a context name.
+        """
+        self.store = store
+        self.scope = scope
+
+    def _key(self, key: str) -> str:
+        """Apply the scope prefix.
+
+        Args:
+            key: Unscoped accounting key.
+
+        Returns:
+            Scoped key.
+        """
+        return f"{self.scope}::{key}"
+
+    async def record(self, key: str, tokens: int = 0, cost: float = 0.0) -> None:
+        """Record usage under the scoped key.
+
+        Args:
+            key: Unscoped accounting key.
+            tokens: Tokens consumed.
+            cost: Estimated spend in USD.
+        """
+        await self.store.record(self._key(key), tokens=tokens, cost=cost)
+
+    async def get(self, key: str) -> UsageSnapshot:
+        """Read the snapshot for a scoped key.
+
+        Args:
+            key: Unscoped accounting key.
+
+        Returns:
+            The current snapshot, zero-valued when unknown.
+        """
+        return await self.store.get(self._key(key))
+
+    async def get_many(self, keys: Sequence[str]) -> dict[str, UsageSnapshot]:
+        """Read several snapshots, returning them under the unscoped keys.
+
+        Args:
+            keys: Unscoped accounting keys.
+
+        Returns:
+            Mapping of unscoped key to snapshot.
+        """
+        scoped = [self._key(key) for key in keys]
+        resolved = await self.store.get_many(scoped)
+        return {key: resolved.get(self._key(key), UsageSnapshot()) for key in keys}
+
+    async def reset(self, key: str) -> None:
+        """Discard accumulated usage for a scoped key.
+
+        Args:
+            key: Unscoped accounting key.
+        """
+        await self.store.reset(self._key(key))
+
+
 class InMemoryStore:
     """Default :class:`UsageStore` backed by a plain dict.
 

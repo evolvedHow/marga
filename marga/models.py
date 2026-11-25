@@ -254,6 +254,78 @@ class ModelListResponse(BaseModel):
     data: list[ModelCard]
 
 
+class EmbeddingRequest(BaseModel):
+    """OpenAI-compatible embeddings request.
+
+    Attributes:
+        model: Embedding model id. Empty lets the router pick a backend.
+        input: Text, list of texts, or token ids to embed.
+        dimensions: Requested output width, for models that support truncation.
+        encoding_format: ``float`` for a JSON array, ``base64`` for packed bytes.
+        user: Opaque caller identifier forwarded to the backend.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str = Field(
+        default="", description="Embedding model identifier; empty lets the router choose"
+    )
+    input: str | list[str] | list[int] | list[list[int]] = Field(
+        description="Text, batch of texts, or token ids to embed"
+    )
+    dimensions: int | None = Field(
+        default=None, ge=1, description="Requested embedding width (model dependent)"
+    )
+    encoding_format: Literal["float", "base64"] | None = Field(
+        default=None, description="Encoding for the embedding vectors"
+    )
+    user: str | None = Field(default=None, description="Opaque caller identifier")
+
+
+class EmbeddingVector(BaseModel):
+    """One embedding in an OpenAI-compatible response.
+
+    Attributes:
+        object: Always ``embedding``.
+        index: Position of the input this vector belongs to.
+        embedding: The vector, as floats or a base64 string.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    object: Literal["embedding"] = "embedding"
+    index: int = Field(default=0, ge=0)
+    embedding: list[float] | str
+
+
+class EmbeddingResponse(BaseModel):
+    """OpenAI-compatible embeddings response.
+
+    Attributes:
+        object: Always ``list``.
+        data: One vector per input.
+        model: Model that produced the embeddings (post-routing).
+        usage: Token accounting, when the backend supplies it.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    object: Literal["list"] = "list"
+    data: list[EmbeddingVector]
+    model: str = ""
+    usage: Usage | None = None
+
+
+class AnthropicCountTokensResponse(BaseModel):
+    """Response for ``POST /v1/messages/count_tokens``.
+
+    Attributes:
+        input_tokens: Estimated prompt token count.
+    """
+
+    input_tokens: int = Field(ge=0, description="Estimated number of prompt tokens")
+
+
 class ProxyInfo(BaseModel):
     """Proxy metadata exposed at the root endpoint.
 
@@ -262,7 +334,9 @@ class ProxyInfo(BaseModel):
         version: Installed marga version.
         docs: URL to the interactive API documentation.
         endpoints: List of available HTTP endpoints.
-        backends: Names of configured backends.
+        backends: Names of configured backends for the default context.
+        contexts: Names of configured request contexts.
+        default_context: Context used when no key is presented.
     """
 
     name: str
@@ -270,6 +344,8 @@ class ProxyInfo(BaseModel):
     docs: str
     endpoints: list[str]
     backends: list[str]
+    contexts: list[str] = Field(default_factory=list)
+    default_context: str = ""
 
 
 class BackendHealth(BaseModel):

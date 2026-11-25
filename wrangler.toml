@@ -21,10 +21,17 @@ MARGA_RUNTIME = "cloud"  # Force cloud runtime detection
 # These must be set before deploying:
 #   wrangler secret put VAULT_URL
 #   wrangler secret put VAULT_TOKEN  
-#   wrangler secret put MARGA_AUTH_TOKEN  # Optional: bearer token for public access
+#   wrangler secret put MARGA_AUTH_TOKEN  # Optional: legacy single-token auth
 #
 # Worker will read provider keys from worker-env vault context "marga"
 # Example vault keys: KEY_ANTHROPIC, KEY_OPENAI, KEY_GROQ, KEY_OPENROUTER
+#
+# Per-caller credential contexts (optional). Contexts themselves are declared in
+# MARGA_CONTEXTS; the context tokens live in the vault, so nothing secret is
+# duplicated here:
+#   wrangler secret put MARGA_CONTEXTS
+#   # {"personal":{"vault_context":"marga","token_secret":"MARGA_TOKEN_PERSONAL","default":true},
+#   #  "nonprofit":{"vault_context":"nonprofit","token_secret":"MARGA_TOKEN_NONPROFIT"}}
 
 # Backends configuration
 # Set via environment variable as JSON:

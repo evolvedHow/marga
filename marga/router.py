@@ -14,12 +14,17 @@ from typing import Any
 
 from ._util import detect_runtime, is_loopback, maybe_await
 from .availability import AvailabilityChecker
+from .contexts import BACKEND_CONTEXT_INHERIT
 from .errors import UnknownBackendError
 from .hooks import HookContext
 from .store import InMemoryStore, UsageStore, usage_key
 from .strategies import LeastUsed
 
 DEFAULT_MODELS_FALLBACK = "default"
+
+#: Capability every chat backend has; ``"embeddings"`` backends declare their own.
+CAPABILITY_CHAT = "chat"
+CAPABILITY_EMBEDDINGS = "embeddings"
 
 
 @dataclass
@@ -43,6 +48,18 @@ class Backend:
             accounting and the :func:`~marga.strategies.cheapest` strategy.
         headers: Extra HTTP headers sent upstream (provider-specific auth).
         enabled: Disabled backends are skipped by every strategy.
+        context: Credential scope. ``"inherit"`` (the default) makes the
+            backend selectable from every context and resolves its key in the
+            caller's vault context; ``"shared"`` does the same but always reads
+            the proxy's own vault context; any other value pins the backend to
+            that context, so only callers in it can reach it.
+        vault_context: Explicit vault context override for this backend's key,
+            regardless of :attr:`context`.
+        capabilities: Endpoint families this backend serves - ``"chat"`` and
+            ``"embeddings"``.
+        advertise: Model ids listed by ``GET /v1/models``. Defaults to
+            :attr:`models`; set it for pass-through gateways whose model list
+            is not known up front.
     """
 
     name: str
@@ -54,6 +71,10 @@ class Backend:
     cost_per_1k_tokens: float = 0.0
     headers: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    context: str = "inherit"
+    vault_context: str = ""
+    capabilities: frozenset[str] = frozenset({CAPABILITY_CHAT})
+    advertise: list[str] = field(default_factory=list)
 
     def serves(self, model: str) -> bool:
         """Report whether this backend accepts ``model``.
@@ -68,6 +89,25 @@ class Backend:
         if not self.models:
             return True
         return bool(model) and model in self.models
+
+    def supports(self, capability: str) -> bool:
+        """Report whether this backend serves an endpoint family.
+
+        Args:
+            capability: ``"chat"`` or ``"embeddings"``.
+
+        Returns:
+            ``True`` when the capability is declared.
+        """
+        return capability in self.capabilities
+
+    def advertised_models(self) -> list[str]:
+        """Model ids to publish in ``GET /v1/models``.
+
+        Returns:
+            :attr:`advertise` when set, otherwise :attr:`models`.
+        """
+        return list(self.advertise) if self.advertise else list(self.models)
 
 
 class Router:
@@ -92,6 +132,7 @@ class Router:
         failover: bool = True,
         strategy: Any | None = None,
         check_availability: bool = True,
+        availability: AvailabilityChecker | None = None,
     ) -> None:
         """Create a router.
 
@@ -105,13 +146,20 @@ class Router:
                 the default least-used strategy.
             check_availability: When ``True``, probe backends for reachability
                 (loopback backends are auto-disabled in cloud runtime).
+            availability: Shared availability checker. Per-context routers
+                pass the same instance so a probe is not repeated once per
+                context.
         """
         self.backends = backends
         self.store: UsageStore = store if store is not None else InMemoryStore()
         self.failover = failover
         self._target: Any | None = strategy
         self.check_availability = check_availability
-        self._availability = AvailabilityChecker() if check_availability else None
+        self._availability = (
+            availability
+            if availability is not None
+            else (AvailabilityChecker() if check_availability else None)
+        )
         self._runtime = detect_runtime()
 
         # Filter out loopback backends in cloud runtime
@@ -161,6 +209,21 @@ class Router:
             Enabled backends in declaration order.
         """
         return [backend for backend in self.backends.values() if backend.enabled]
+
+    def backends_for(self, capability: str) -> list[Backend]:
+        """List enabled backends that serve an endpoint family.
+
+        Args:
+            capability: ``"chat"`` or ``"embeddings"``.
+
+        Returns:
+            Enabled backends declaring the capability, in declaration order.
+        """
+        return [
+            backend
+            for backend in self.backends.values()
+            if backend.enabled and backend.supports(capability)
+        ]
 
     def resolve_model(self, backend: Backend, requested: str) -> str:
         """Decide which model id to send to ``backend``.
@@ -378,7 +441,8 @@ def build_backends(config: dict[str, dict[str, Any]]) -> dict[str, Backend]:
         config: Mapping of backend name to its configuration dict. Recognised
             keys: ``base_url`` (required), ``api_key``, ``api_key_secret``,
             ``api_key_env``, ``models``, ``cost_per_1k_tokens``, ``headers``,
-            ``enabled``.
+            ``enabled``, ``context``, ``vault_context``, ``capabilities``,
+            ``advertise``.
 
     Returns:
         Backend table keyed by name.
@@ -393,6 +457,10 @@ def build_backends(config: dict[str, dict[str, Any]]) -> dict[str, Backend]:
             raise ValueError(f"Backend {name!r} is missing 'base_url'")
         if "/" in name:
             raise ValueError(f"Backend name {name!r} must not contain '/'")
+        declared = cfg.get("capabilities")
+        capabilities = (
+            frozenset(str(item) for item in declared) if declared else frozenset({CAPABILITY_CHAT})
+        )
         backends[name] = Backend(
             name=name,
             base_url=str(cfg["base_url"]),
@@ -403,6 +471,10 @@ def build_backends(config: dict[str, dict[str, Any]]) -> dict[str, Backend]:
             cost_per_1k_tokens=float(cfg.get("cost_per_1k_tokens", 0.0)),
             headers={str(k): str(v) for k, v in cfg.get("headers", {}).items()},
             enabled=bool(cfg.get("enabled", True)),
+            context=str(cfg.get("context", BACKEND_CONTEXT_INHERIT)),
+            vault_context=str(cfg.get("vault_context", "")),
+            capabilities=capabilities,
+            advertise=[str(model) for model in cfg.get("advertise", [])],
         )
     if not backends:
         raise ValueError("At least one backend must be configured")
